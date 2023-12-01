@@ -21,7 +21,7 @@ export function w(count = 1): WildcardSegment {
 }
 
 export class Trie<I, V> {
-  #rootNode: Node<I, V> = new Map();
+  #root: Node<I, V> = new Map();
   #size = 0;
   async add(
     initialEntries: AnyIterable<[AnyIterable<I | WildcardSegment>, V]> = [],
@@ -35,39 +35,8 @@ export class Trie<I, V> {
       this.setSync(key, value);
     }
   }
-  #makeImpl(node: Node<I, V>, segment: I | WildcardSegment) {
-    if (isWildcardSegment(segment)) {
-      const wildcardReqCount = segment.get(wildcardSymbol) ?? 1;
-      let wildcardCount = 0;
-      let parentNode: Node<I, V> | undefined = undefined;
-      while (node.has(wildcardSymbol) && wildcardCount < wildcardReqCount) {
-        const childNode = node.get(wildcardSymbol)!;
-        wildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
-        parentNode = node;
-        node = childNode;
-      }
-      if (wildcardCount < wildcardReqCount) {
-        const diffCount = wildcardReqCount - wildcardCount;
-        const childNode = new Map();
-        childNode.set(wildcardCountSymbol, diffCount);
-        node.set(wildcardSymbol, childNode);
-        return childNode;
-      } else if (wildcardCount === wildcardReqCount) {
-        return node;
-      } else {
-        assumeAs<CountNode<I, V>>(node);
-        const diffCount = wildcardCount - wildcardReqCount;
-        const childNode = new Map() as CountNode<I, V>;
-        childNode.set(
-          wildcardCountSymbol,
-          node.get(wildcardCountSymbol)! - diffCount,
-        );
-        node.set(wildcardCountSymbol, diffCount);
-        parentNode!.set(wildcardSymbol, childNode);
-        childNode.set(wildcardSymbol, node);
-        return childNode;
-      }
-    } else {
+  #hardSeek(node: Node<I, V>, segment: I | WildcardSegment) {
+    if (!isWildcardSegment(segment)) {
       let childNode = node.get(segment);
       if (!childNode) {
         childNode = new Map();
@@ -75,23 +44,42 @@ export class Trie<I, V> {
       }
       return childNode;
     }
-  }
-  async #make(path: AnyIterable<I | WildcardSegment>) {
-    let node = this.#rootNode;
-    for await (const segment of path) {
-      node = this.#makeImpl(node, segment);
+    const wildcardReqCount = segment.get(wildcardSymbol) ?? 1;
+    let wildcardCount = 0;
+    let parentNode: Node<I, V> | undefined = undefined;
+    while (node.has(wildcardSymbol) && wildcardCount < wildcardReqCount) {
+      const childNode = node.get(wildcardSymbol)!;
+      wildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
+      parentNode = node;
+      node = childNode;
     }
-    return node;
-  }
-  #makeSync(path: Iterable<I | WildcardSegment>) {
-    let node = this.#rootNode;
-    for (const segment of path) {
-      node = this.#makeImpl(node, segment);
+    if (wildcardCount === wildcardReqCount) {
+      return node;
     }
-    return node;
+    if (wildcardCount < wildcardReqCount) {
+      const diffCount = wildcardReqCount - wildcardCount;
+      const childNode = new Map();
+      childNode.set(wildcardCountSymbol, diffCount);
+      node.set(wildcardSymbol, childNode);
+      return childNode;
+    }
+    assumeAs<CountNode<I, V>>(node);
+    const diffCount = wildcardCount - wildcardReqCount;
+    const childNode = new Map() as CountNode<I, V>;
+    childNode.set(
+      wildcardCountSymbol,
+      node.get(wildcardCountSymbol)! - diffCount,
+    );
+    node.set(wildcardCountSymbol, diffCount);
+    parentNode!.set(wildcardSymbol, childNode);
+    childNode.set(wildcardSymbol, node);
+    return childNode;
   }
   async set(path: AnyIterable<I | WildcardSegment>, value: V) {
-    const node = await this.#make(path);
+    let node = this.#root;
+    for await (const segment of path) {
+      node = this.#hardSeek(node, segment);
+    }
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, value);
     if (!exists) {
@@ -100,7 +88,10 @@ export class Trie<I, V> {
     return this;
   }
   setSync(path: Iterable<I | WildcardSegment>, value: V) {
-    const node = this.#makeSync(path);
+    let node = this.#root;
+    for (const segment of path) {
+      node = this.#hardSeek(node, segment);
+    }
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, value);
     if (!exists) {
@@ -112,7 +103,10 @@ export class Trie<I, V> {
     path: AnyIterable<I | WildcardSegment>,
     callback: (prev: V | undefined, exists: boolean) => V | Promise<V>,
   ) {
-    const node = await this.#make(path);
+    let node = this.#root;
+    for await (const segment of path) {
+      node = this.#hardSeek(node, segment);
+    }
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, await callback(node.get(dataSymbol), exists));
     if (!exists) {
@@ -124,7 +118,10 @@ export class Trie<I, V> {
     path: Iterable<I | WildcardSegment>,
     callback: (prev: V | undefined, exists: boolean) => V,
   ) {
-    const node = this.#makeSync(path);
+    let node = this.#root;
+    for (const segment of path) {
+      node = this.#hardSeek(node, segment);
+    }
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, callback(node.get(dataSymbol), exists));
     if (!exists) {
@@ -132,34 +129,59 @@ export class Trie<I, V> {
     }
     return this;
   }
-  async #seek(
-    path: AnyIterable<I | WildcardSegment>,
-    stack?: [I | WildcardSegment, Node<I | WildcardSegment, V>][],
+  // TODO: fix trie.getSync([1, w(), w()])
+  #softSeek(
+    node: Node<I, V>,
+    segment: I | WildcardSegment,
+    stack?: [I | WildcardSegment, Node<I, V>][],
   ) {
-    let node = this.#rootNode;
-    for await (const segment of path) {
+    if (!isWildcardSegment(segment)) {
       const childNode = node.get(segment);
       if (!childNode) {
         stack?.splice(0, stack.length);
         return undefined;
       }
       stack?.unshift([segment, node]);
+      return childNode;
+    }
+    const wildcardReqCount = segment.get(wildcardSymbol) ?? 1;
+    let wildcardCount = 0;
+    while (node.has(wildcardSymbol) && wildcardCount < wildcardReqCount) {
+      const childNode = node.get(wildcardSymbol)!;
+      wildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
+      stack?.unshift([segment, node]);
+      node = childNode;
+    }
+    if (wildcardCount === wildcardReqCount) {
+      return node;
+    }
+    stack?.splice(0, stack.length);
+    return undefined;
+  }
+  async #seek(
+    path: AnyIterable<I | WildcardSegment>,
+    stack?: [I | WildcardSegment, Node<I, V>][],
+  ) {
+    let node = this.#root;
+    for await (const segment of path) {
+      const childNode = this.#softSeek(node, segment, stack);
+      if (!childNode) {
+        return undefined;
+      }
       node = childNode;
     }
     return node;
   }
   #seekSync(
     path: Iterable<I | WildcardSegment>,
-    stack?: [I | WildcardSegment, Node<I | WildcardSegment, V>][],
+    stack?: [I | WildcardSegment, Node<I, V>][],
   ) {
-    let node = this.#rootNode;
+    let node = this.#root;
     for (const segment of path) {
-      const childNode = node.get(segment);
+      const childNode = this.#softSeek(node, segment, stack);
       if (!childNode) {
-        stack?.splice(0, stack.length);
         return undefined;
       }
-      stack?.unshift([segment, node]);
       node = childNode;
     }
     return node;
@@ -176,128 +198,128 @@ export class Trie<I, V> {
   getSync(path: Iterable<I | WildcardSegment>) {
     return this.#seekSync(path)?.get(dataSymbol);
   }
-  async delete(path: AnyIterable<I | WildcardSegment>) {
-    const stack: [I, Node<I, V>][] = [];
-    const node = await this.#seek(path, stack);
-    if (!node) {
-      return false;
-    }
-    node.delete(dataSymbol);
-    --this.#size;
-    if (node.size) {
-      return true;
-    }
-    for (const [segment, node] of stack) {
-      node.delete(segment);
-      if (node.size) {
-        return true;
-      }
-    }
-    return true;
-  }
-  deleteSync(path: Iterable<I | WildcardSegment>) {
-    const stack: [I, Node<I, V>][] = [];
-    const node = this.#seekSync(path, stack);
-    if (!node) {
-      return false;
-    }
-    node.delete(dataSymbol);
-    --this.#size;
-    if (node.size) {
-      return true;
-    }
-    for (const [segment, node] of stack) {
-      node.delete(segment);
-      if (node.size) {
-        return true;
-      }
-    }
-    return true;
-  }
+  // async delete(path: AnyIterable<I | WildcardSegment>) {
+  //   const stack: [I, Node<I, V>][] = [];
+  //   const node = await this.#seek(path, stack);
+  //   if (!node) {
+  //     return false;
+  //   }
+  //   node.delete(dataSymbol);
+  //   --this.#size;
+  //   if (node.size) {
+  //     return true;
+  //   }
+  //   for (const [segment, node] of stack) {
+  //     node.delete(segment);
+  //     if (node.size) {
+  //       return true;
+  //     }
+  //   }
+  //   return true;
+  // }
+  // deleteSync(path: Iterable<I | WildcardSegment>) {
+  //   const stack: [I, Node<I, V>][] = [];
+  //   const node = this.#seekSync(path, stack);
+  //   if (!node) {
+  //     return false;
+  //   }
+  //   node.delete(dataSymbol);
+  //   --this.#size;
+  //   if (node.size) {
+  //     return true;
+  //   }
+  //   for (const [segment, node] of stack) {
+  //     node.delete(segment);
+  //     if (node.size) {
+  //       return true;
+  //     }
+  //   }
+  //   return true;
+  // }
   clear() {
-    this.#rootNode.clear();
+    this.#root.clear();
     this.#size = 0;
     return;
   }
-  async *#branchOut(
-    node: Node<I | WildcardSegment, V>,
-    pathIterator: AsyncIterator<I> | Iterator<I>,
-  ): AsyncGenerator<V | undefined, void, unknown> {
-    // yield data
-    if (node.has(dataSymbol)) {
-      yield node.get(dataSymbol);
-    }
-    const { value, done } = await pathIterator.next();
-    if (done) {
-      return;
-    }
-    // find matched node
-    const nextNodeWildcard = node.get(Wildcard);
-    const nextNodeExact = node.get(value);
-    // wildcard match only
-    if (nextNodeWildcard && !nextNodeExact) {
-      yield* this.#branchOut(nextNodeWildcard, pathIterator);
-    }
-    // exact match only
-    else if (!nextNodeWildcard && nextNodeExact) {
-      yield* this.#branchOut(nextNodeExact, pathIterator);
-    }
-    // both, we need to tee the path iterator
-    else if (nextNodeWildcard && nextNodeExact) {
-      const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
-      yield* this.#branchOut(nextNodeWildcard, pathIterator2);
-      yield* this.#branchOut(nextNodeExact, pathIterator1);
-    }
-    // none
-    else {
-      return;
-    }
-  }
-  *#branchOutSync(
-    node: Node<I | WildcardSegment, V>,
-    pathIterator: Iterator<I>,
-  ): Generator<V | undefined, void, unknown> {
-    // yield data
-    if (node.has(dataSymbol)) {
-      yield node.get(dataSymbol);
-    }
-    const { value, done } = pathIterator.next();
-    if (done) {
-      return;
-    }
-    // find matched node
-    const nextNodeWildcard = node.get(Wildcard);
-    const nextNodeExact = node.get(value);
-    // wildcard match only
-    if (nextNodeWildcard && !nextNodeExact) {
-      yield* this.#branchOutSync(nextNodeWildcard, pathIterator);
-    }
-    // exact match only
-    else if (!nextNodeWildcard && nextNodeExact) {
-      yield* this.#branchOutSync(nextNodeExact, pathIterator);
-    }
-    // both, we need to tee the path iterator
-    else if (nextNodeWildcard && nextNodeExact) {
-      const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
-      yield* this.#branchOutSync(nextNodeWildcard, pathIterator2);
-      yield* this.#branchOutSync(nextNodeExact, pathIterator1);
-    }
-    // none
-    else {
-      return;
-    }
-  }
-  async *find(path: AnyIterable<I>) {
-    const pathIterator =
-      Symbol.asyncIterator in path
-        ? path[Symbol.asyncIterator]()
-        : path[Symbol.iterator]();
-    yield* this.#branchOut(this.#rootNode, pathIterator);
-  }
-  *findSync(path: Iterable<I>) {
-    const pathIterator = path[Symbol.iterator]();
-    yield* this.#branchOutSync(this.#rootNode, pathIterator);
-  }
+  // async *#branchOut(
+  //   node: Node<I | WildcardSegment, V>,
+  //   pathIterator: AsyncIterator<I> | Iterator<I>,
+  // ): AsyncGenerator<V | undefined, void, unknown> {
+  //   // yield data
+  //   if (node.has(dataSymbol)) {
+  //     yield node.get(dataSymbol);
+  //   }
+  //   const { value, done } = await pathIterator.next();
+  //   if (done) {
+  //     return;
+  //   }
+  //   // find matched node
+  //   const nextNodeWildcard = node.get(Wildcard);
+  //   const nextNodeExact = node.get(value);
+  //   // wildcard match only
+  //   if (nextNodeWildcard && !nextNodeExact) {
+  //     yield* this.#branchOut(nextNodeWildcard, pathIterator);
+  //   }
+  //   // exact match only
+  //   else if (!nextNodeWildcard && nextNodeExact) {
+  //     yield* this.#branchOut(nextNodeExact, pathIterator);
+  //   }
+  //   // both, we need to tee the path iterator
+  //   else if (nextNodeWildcard && nextNodeExact) {
+  //     const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
+  //     yield* this.#branchOut(nextNodeWildcard, pathIterator2);
+  //     yield* this.#branchOut(nextNodeExact, pathIterator1);
+  //   }
+  //   // none
+  //   else {
+  //     return;
+  //   }
+  // }
+  // *#branchOutSync(
+  //   node: Node<I | WildcardSegment, V>,
+  //   pathIterator: Iterator<I>,
+  // ): Generator<V | undefined, void, unknown> {
+  //   // yield data
+  //   if (node.has(dataSymbol)) {
+  //     yield node.get(dataSymbol);
+  //   }
+  //   const { value, done } = pathIterator.next();
+  //   if (done) {
+  //     return;
+  //   }
+  //   // find matched node
+  //   const nextNodeWildcard = node.get(Wildcard);
+  //   const nextNodeExact = node.get(value);
+  //   // wildcard match only
+  //   if (nextNodeWildcard && !nextNodeExact) {
+  //     yield* this.#branchOutSync(nextNodeWildcard, pathIterator);
+  //   }
+  //   // exact match only
+  //   else if (!nextNodeWildcard && nextNodeExact) {
+  //     yield* this.#branchOutSync(nextNodeExact, pathIterator);
+  //   }
+  //   // both, we need to tee the path iterator
+  //   else if (nextNodeWildcard && nextNodeExact) {
+  //     const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
+  //     yield* this.#branchOutSync(nextNodeWildcard, pathIterator2);
+  //     yield* this.#branchOutSync(nextNodeExact, pathIterator1);
+  //   }
+  //   // none
+  //   else {
+  //     return;
+  //   }
+  // }
+  // async *find(path: AnyIterable<I>) {
+  //   const pathIterator =
+  //     Symbol.asyncIterator in path
+  //       ? path[Symbol.asyncIterator]()
+  //       : path[Symbol.iterator]();
+  //   yield* this.#branchOut(this.#rootNode, pathIterator);
+  // }
+  // *findSync(path: Iterable<I>) {
+  //   const pathIterator = path[Symbol.iterator]();
+  //   yield* this.#branchOutSync(this.#rootNode, pathIterator);
+  // }
   get size() {
     return this.#size;
   }
@@ -311,7 +333,7 @@ export class Trie<I, V> {
  * See: MattiasBuelens/web-streams-polyfill#80
  */
 
-function teeIterator<T>(iterator: AsyncIterator<T> | Iterator<T>) {
+export function teeIterator<T>(iterator: AsyncIterator<T> | Iterator<T>) {
   interface LinkedListNode<T> {
     value: T;
     next: LinkedListNode<T> | undefined;
@@ -374,7 +396,7 @@ function teeIterator<T>(iterator: AsyncIterator<T> | Iterator<T>) {
   return [branch(0, buffer), branch(1, buffer)] as const;
 }
 
-function teeIteratorSync<T>(iterator: Iterator<T>) {
+export function teeIteratorSync<T>(iterator: Iterator<T>) {
   interface LinkedListNode<T> {
     value: T;
     next: LinkedListNode<T> | undefined;
@@ -432,4 +454,6 @@ function isWildcardSegment(segment: unknown): segment is WildcardSegment {
   return segment instanceof WeakMap && segment.has(wildcardSymbol);
 }
 
-function assumeAs<T>(_: unknown): asserts _ is T {}
+/* @__NO_SIDE_EFFECTS__ */ function assumeAs<T>(_: unknown): asserts _ is T {
+  /* void */
+}
