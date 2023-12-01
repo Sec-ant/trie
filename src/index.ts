@@ -57,15 +57,15 @@ export class Trie<I, V> {
       } else {
         assumeAs<CountNode<I, V>>(node);
         const diffCount = wildcardCount - wildcardReqCount;
-        const newNode = new Map() as CountNode<I, V>;
-        newNode.set(
+        const childNode = new Map() as CountNode<I, V>;
+        childNode.set(
           wildcardCountSymbol,
           node.get(wildcardCountSymbol)! - diffCount,
         );
         node.set(wildcardCountSymbol, diffCount);
-        parentNode!.set(wildcardSymbol, newNode);
-        newNode.set(wildcardSymbol, node);
-        return node;
+        parentNode!.set(wildcardSymbol, childNode);
+        childNode.set(wildcardSymbol, node);
+        return childNode;
       }
     } else {
       let childNode = node.get(segment);
