@@ -8,88 +8,85 @@ type DataSymbol = typeof dataSymbol;
 type WildcardSymbol = typeof wildcardSymbol;
 type WildcardCountSymbol = typeof wildcardCountSymbol;
 
-// type LeafNode<V> = Map<DataSymbol, V>;
-// type NonLeafNode<I, V> = Map<I, LeafNode<V>> &
-//   Map<WildcardSymbol, LeafNode<V> & Map<WildcardCountSymbol, number>>;
-// type Node<I, V> = NonLeafNode<I, V> & LeafNode<V>;
-
 type Node<I, V> = Map<I, Node<I, V>> &
-  Map<WildcardSymbol, Map<WildcardCountSymbol, number> & Node<I, V>> &
+  Map<WildcardSymbol, CountNode<I, V>> &
   Map<DataSymbol, V>;
 
-// type Node<I, V> = Map<I, Node<I, V>> &
-//   Map<typeof dataSymbol, V> &
-//   Map<
-//     typeof wildcardSymbol,
-//     Map<typeof wildcardCountSymbol, number> & Node<I, V>
-//   >;
+type CountNode<I, V> = Map<WildcardCountSymbol, number> & Node<I, V>;
 
-type WildcardSegment = WeakMap<typeof wildcardSymbol, number>;
+export type WildcardSegment = WeakMap<typeof wildcardSymbol, number>;
+
+export function w(count = 1): WildcardSegment {
+  return new WeakMap([[wildcardSymbol, count]]);
+}
 
 export class Trie<I, V> {
   #rootNode: Node<I, V> = new Map();
   #size = 0;
-  static ["*"](count = 1): WildcardSegment {
-    return new WeakMap([[wildcardSymbol, count]]);
-  }
-  async init(
+  async add(
     initialEntries: AnyIterable<[AnyIterable<I | WildcardSegment>, V]> = [],
   ) {
     for await (const [key, value] of initialEntries) {
       await this.set(key, value);
     }
   }
-  initSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]> = []) {
+  addSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]> = []) {
     for (const [key, value] of initialEntries) {
       this.setSync(key, value);
+    }
+  }
+  #makeImpl(node: Node<I, V>, segment: I | WildcardSegment) {
+    if (isWildcardSegment(segment)) {
+      const wildcardReqCount = segment.get(wildcardSymbol) ?? 1;
+      let wildcardCount = 0;
+      let parentNode: Node<I, V> | undefined = undefined;
+      while (node.has(wildcardSymbol) && wildcardCount < wildcardReqCount) {
+        const childNode = node.get(wildcardSymbol)!;
+        wildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
+        parentNode = node;
+        node = childNode;
+      }
+      if (wildcardCount < wildcardReqCount) {
+        const diffCount = wildcardReqCount - wildcardCount;
+        const childNode = new Map();
+        childNode.set(wildcardCountSymbol, diffCount);
+        node.set(wildcardSymbol, childNode);
+        return childNode;
+      } else if (wildcardCount === wildcardReqCount) {
+        return node;
+      } else {
+        assumeAs<CountNode<I, V>>(node);
+        const diffCount = wildcardCount - wildcardReqCount;
+        const newNode = new Map() as CountNode<I, V>;
+        newNode.set(
+          wildcardCountSymbol,
+          node.get(wildcardCountSymbol)! - diffCount,
+        );
+        node.set(wildcardCountSymbol, diffCount);
+        parentNode!.set(wildcardSymbol, newNode);
+        newNode.set(wildcardSymbol, node);
+        return node;
+      }
+    } else {
+      let childNode = node.get(segment);
+      if (!childNode) {
+        childNode = new Map();
+        node.set(segment, childNode);
+      }
+      return childNode;
     }
   }
   async #make(path: AnyIterable<I | WildcardSegment>) {
     let node = this.#rootNode;
     for await (const segment of path) {
-      if (isWildcardSegment(segment)) {
-        const wildcardReqCount = segment.get(wildcardSymbol) ?? 1;
-        let childNode = node.get(wildcardSymbol);
-        //
-        if (!childNode) {
-          childNode = new Map();
-          childNode.set(wildcardCountSymbol, wildcardReqCount);
-          node = childNode;
-          continue;
-        }
-        //
-        else {
-          let wildcardNode: typeof childNode | undefined = childNode;
-          let wildcardCount = 0;
-          while (wildcardNode && wildcardCount < wildcardReqCount) {
-            wildcardCount += wildcardNode.get(wildcardCountSymbol) ?? 1;
-            wildcardNode = wildcardNode.get(wildcardSymbol);
-          }
-          if (wildcardCount < wildcardReqCount) {
-            const diffCount = wildcardReqCount - wildcardCount;
-          }
-        }
-      } else {
-        let childNode = node.get(segment);
-        if (!childNode) {
-          childNode = new Map();
-          node.set(segment, childNode);
-        }
-        node = childNode;
-        continue;
-      }
+      node = this.#makeImpl(node, segment);
     }
     return node;
   }
   #makeSync(path: Iterable<I | WildcardSegment>) {
     let node = this.#rootNode;
     for (const segment of path) {
-      let childNode = node.get(segment);
-      if (!childNode) {
-        childNode = new Map();
-        node.set(segment, childNode);
-      }
-      node = childNode;
+      node = this.#makeImpl(node, segment);
     }
     return node;
   }
@@ -434,3 +431,5 @@ function teeIteratorSync<T>(iterator: Iterator<T>) {
 function isWildcardSegment(segment: unknown): segment is WildcardSegment {
   return segment instanceof WeakMap && segment.has(wildcardSymbol);
 }
+
+function assumeAs<T>(_: unknown): asserts _ is T {}
