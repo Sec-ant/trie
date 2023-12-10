@@ -45,7 +45,11 @@ export class Trie<I, V> {
       this.setSync(key, value);
     }
   }
-  #hardSeek(node: Node<I, V>, segment: I | WildcardSegment) {
+  #hardSeekImpl(
+    node: Node<I, V>,
+    segment: I | WildcardSegment,
+    seekContext: SeekContext,
+  ) {
     if (!isWildcardSegment(segment)) {
       let childNode = node.get(segment);
       if (!childNode) {
@@ -54,42 +58,67 @@ export class Trie<I, V> {
       }
       return childNode;
     }
-    const pathWildcardCount = segment.get(wildcardSymbol) ?? 1;
-    let nodeWildcardCount = 0;
-    let parentNode: Node<I, V> | undefined = undefined;
-    while (node.has(wildcardSymbol) && nodeWildcardCount < pathWildcardCount) {
+    seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
+    while (node.has(wildcardSymbol)) {
       const childNode = node.get(wildcardSymbol)!;
-      nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
-      parentNode = node;
-      node = childNode;
+      seekContext.nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
+      if (seekContext.nodeWildcardCount === seekContext.pathWildcardCount) {
+        return childNode;
+      }
+      if (seekContext.nodeWildcardCount < seekContext.pathWildcardCount) {
+        node = childNode;
+        continue;
+      }
+      const diffCount =
+        seekContext.nodeWildcardCount - seekContext.pathWildcardCount;
+      const newChildNode = new Map() as CountNode<I, V>;
+      newChildNode.set(
+        wildcardCountSymbol,
+        childNode.get(wildcardCountSymbol)! - diffCount,
+      );
+      childNode.set(wildcardCountSymbol, diffCount);
+      node.set(wildcardSymbol, newChildNode);
+      newChildNode.set(wildcardSymbol, childNode);
+      return newChildNode;
     }
-    if (nodeWildcardCount === pathWildcardCount) {
+    if (seekContext.nodeWildcardCount >= seekContext.pathWildcardCount) {
       return node;
     }
-    if (nodeWildcardCount < pathWildcardCount) {
-      const diffCount = pathWildcardCount - nodeWildcardCount;
-      const childNode = new Map();
-      childNode.set(wildcardCountSymbol, diffCount);
-      node.set(wildcardSymbol, childNode);
-      return childNode;
-    }
-    assumeAs<CountNode<I, V>>(node);
-    const diffCount = nodeWildcardCount - pathWildcardCount;
+    const diffCount =
+      seekContext.pathWildcardCount - seekContext.nodeWildcardCount;
     const childNode = new Map() as CountNode<I, V>;
-    childNode.set(
-      wildcardCountSymbol,
-      node.get(wildcardCountSymbol)! - diffCount,
-    );
-    node.set(wildcardCountSymbol, diffCount);
-    parentNode!.set(wildcardSymbol, childNode);
-    childNode.set(wildcardSymbol, node);
+    childNode.set(wildcardCountSymbol, diffCount);
+    node.set(wildcardSymbol, childNode);
     return childNode;
   }
-  async set(path: AnyIterable<I | WildcardSegment>, value: V) {
+  async #hardSeek(path: AnyIterable<I | WildcardSegment>) {
     let node = this.#root;
+    const seekContext: SeekContext = {
+      nodeWildcardCount: 0,
+      pathWildcardCount: 0,
+    };
     for await (const segment of path) {
-      node = this.#hardSeek(node, segment);
+      node = this.#hardSeekImpl(node, segment, seekContext);
     }
+    if (seekContext.nodeWildcardCount === seekContext.pathWildcardCount) {
+      return node;
+    }
+    if (seekContext.nodeWildcardCount > seekContext.pathWildcardCount) {
+      assumeAs<CountNode<I, V>>(node);
+      const diffCount =
+        seekContext.nodeWildcardCount - seekContext.pathWildcardCount;
+      const newChildNode = new Map() as CountNode<I, V>;
+      newChildNode.set(
+        wildcardCountSymbol,
+        node.get(wildcardCountSymbol)! - diffCount,
+      );
+      childNode.set(wildcardCountSymbol, diffCount);
+      node.set(wildcardSymbol, newChildNode);
+      newChildNode.set(wildcardSymbol, childNode);
+      return newChildNode;
+    }
+  }
+  async set(path: AnyIterable<I | WildcardSegment>, value: V) {
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, value);
     if (!exists) {
@@ -139,7 +168,7 @@ export class Trie<I, V> {
     }
     return this;
   }
-  #softSeek(
+  #softSeekImpl(
     node: Node<I, V>,
     segment: I | WildcardSegment,
     seekContext: SeekContext,
@@ -166,7 +195,7 @@ export class Trie<I, V> {
     }
     return node;
   }
-  async #peek(
+  async #softSeek(
     path: AnyIterable<I | WildcardSegment>,
     stack?: [I | WildcardSegment, Node<I, V>][],
   ) {
@@ -176,7 +205,7 @@ export class Trie<I, V> {
       pathWildcardCount: 0,
     };
     for await (const segment of path) {
-      const childNode = this.#softSeek(node, segment, seekContext, stack);
+      const childNode = this.#softSeekImpl(node, segment, seekContext, stack);
       if (!childNode) {
         return undefined;
       }
@@ -188,7 +217,7 @@ export class Trie<I, V> {
     }
     return node;
   }
-  #peekSync(
+  #softSeekSync(
     path: Iterable<I | WildcardSegment>,
     stack?: [I | WildcardSegment, Node<I, V>][],
   ) {
@@ -198,7 +227,7 @@ export class Trie<I, V> {
       pathWildcardCount: 0,
     };
     for (const segment of path) {
-      const childNode = this.#softSeek(node, segment, seekContext, stack);
+      const childNode = this.#softSeekImpl(node, segment, seekContext, stack);
       if (!childNode) {
         return undefined;
       }
@@ -211,16 +240,16 @@ export class Trie<I, V> {
     return node;
   }
   async has(path: AnyIterable<I | WildcardSegment>) {
-    return Boolean(await this.#peek(path));
+    return Boolean(await this.#softSeek(path));
   }
   hasSync(path: Iterable<I | WildcardSegment>) {
-    return Boolean(this.#peekSync(path));
+    return Boolean(this.#softSeekSync(path));
   }
   async get(path: AnyIterable<I | WildcardSegment>) {
-    return (await this.#peek(path))?.get(dataSymbol);
+    return (await this.#softSeek(path))?.get(dataSymbol);
   }
   getSync(path: Iterable<I | WildcardSegment>) {
-    return this.#peekSync(path)?.get(dataSymbol);
+    return this.#softSeekSync(path)?.get(dataSymbol);
   }
   // async delete(path: AnyIterable<I | WildcardSegment>) {
   //   const stack: [I, Node<I, V>][] = [];
@@ -480,4 +509,8 @@ function isWildcardSegment(segment: unknown): segment is WildcardSegment {
 
 /* @__NO_SIDE_EFFECTS__ */ function assumeAs<T>(_: unknown): asserts _ is T {
   /* void */
+}
+
+function isCountNode<I, V>(node: Node<I, V>): node is CountNode<I, V> {
+  return (node as CountNode<I, V>).has(wildcardCountSymbol);
 }
