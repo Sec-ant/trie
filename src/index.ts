@@ -51,6 +51,7 @@ export class Trie<I, V> {
     seekContext: SeekContext,
   ) {
     if (!isWildcardSegment(segment)) {
+      // TODO: we should check here
       let childNode = node.get(segment);
       if (!childNode) {
         childNode = new Map();
@@ -69,6 +70,7 @@ export class Trie<I, V> {
         node = childNode;
         continue;
       }
+      // TODO: we do not check here
       const diffCount =
         seekContext.nodeWildcardCount - seekContext.pathWildcardCount;
       const newChildNode = new Map() as CountNode<I, V>;
@@ -103,6 +105,7 @@ export class Trie<I, V> {
     if (seekContext.nodeWildcardCount === seekContext.pathWildcardCount) {
       return node;
     }
+    // TODO: and check here
     if (seekContext.nodeWildcardCount > seekContext.pathWildcardCount) {
       assumeAs<CountNode<I, V>>(node);
       const diffCount =
