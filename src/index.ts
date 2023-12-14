@@ -112,33 +112,21 @@ export class Trie<I, V> {
       return false;
     }
     node.delete(dataSymbol);
+    cleanUp(node, stack);
     --this.#size;
-    if (!hasChildrenOrData(node)) {
-      while (stack.length) {
-        const [segment, node] = stack.pop()!;
-        node.delete(segment);
-        if (hasChildrenOrData(node)) {
-          break;
-        }
-      }
-    }
-    if (
-      !node.has(dataSymbol) &&
-      node.has(wildcardSymbol) &&
-      isWildcardCountNode(node)
-    ) {
-      const childNode = node.get(wildcardSymbol)!;
-      childNode.set(
-        wildcardCountSymbol,
-        childNode.get(wildcardCountSymbol)! + node.get(wildcardCountSymbol)!,
-      );
-      const [, parentNode] = stack.pop()!;
-      parentNode.set(wildcardSymbol, childNode);
-    }
     return true;
   }
-  // deleteSync(path: Iterable<I | WildcardSegment>) {
-  // }
+  deleteSync(path: Iterable<I | WildcardSegment>) {
+    const stack: Stack<I, V> = [];
+    const node = softSeekSync(this.#root, path, stack);
+    if (!node) {
+      return false;
+    }
+    node.delete(dataSymbol);
+    cleanUp(node, stack);
+    --this.#size;
+    return true;
+  }
   clear() {
     this.#root.clear();
     this.#size = 0;
@@ -367,10 +355,7 @@ function isWildcardCountNode<I, V>(
   return (node as WildcardCountNode<I, V>).has(wildcardCountSymbol);
 }
 
-function hardSeekResolve<I, V>(
-  node: Node<I, V>,
-  seekContext: SeekContext<I, V>,
-) {
+function resolveNode<I, V>(node: Node<I, V>, seekContext: SeekContext<I, V>) {
   if (seekContext.nodeWildcardCount < seekContext.pathWildcardCount) {
     const diffCount =
       seekContext.pathWildcardCount - seekContext.nodeWildcardCount;
@@ -398,13 +383,13 @@ function hardSeekResolve<I, V>(
   return node;
 }
 
-function hardSeekImpl<I, V>(
+function hardSeekStep<I, V>(
   node: Node<I, V>,
   segment: I | WildcardSegment,
   seekContext: SeekContext<I, V>,
 ) {
   if (!isWildcardSegment(segment)) {
-    node = hardSeekResolve(node, seekContext);
+    node = resolveNode(node, seekContext);
     let childNode = node.get(segment);
     if (!childNode) {
       childNode = new Map();
@@ -435,9 +420,9 @@ async function hardSeek<I, V>(
     pathWildcardCount: 0,
   };
   for await (const segment of path) {
-    node = hardSeekImpl(node, segment, seekContext);
+    node = hardSeekStep(node, segment, seekContext);
   }
-  return hardSeekResolve(node, seekContext);
+  return resolveNode(node, seekContext);
 }
 
 function hardSeekSync<I, V>(
@@ -450,12 +435,12 @@ function hardSeekSync<I, V>(
     pathWildcardCount: 0,
   };
   for (const segment of path) {
-    node = hardSeekImpl(node, segment, seekContext);
+    node = hardSeekStep(node, segment, seekContext);
   }
-  return hardSeekResolve(node, seekContext);
+  return resolveNode(node, seekContext);
 }
 
-function softSeekImpl<I, V>(
+function softSeekStep<I, V>(
   node: Node<I, V>,
   segment: I | WildcardSegment,
   seekContext: SeekContext<I, V>,
@@ -481,7 +466,7 @@ function softSeekImpl<I, V>(
   ) {
     const childNode = node.get(wildcardSymbol)!;
     seekContext.nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
-    stack?.push([segment, node]);
+    stack?.push([wildcardSymbol, node]);
     node = childNode;
   }
   return node;
@@ -498,7 +483,7 @@ async function softSeek<I, V>(
     pathWildcardCount: 0,
   };
   for await (const segment of path) {
-    const childNode = softSeekImpl(node, segment, seekContext, stack);
+    const childNode = softSeekStep(node, segment, seekContext, stack);
     if (!childNode) {
       return undefined;
     }
@@ -522,7 +507,7 @@ function softSeekSync<I, V>(
     pathWildcardCount: 0,
   };
   for (const segment of path) {
-    const childNode = softSeekImpl(node, segment, seekContext, stack);
+    const childNode = softSeekStep(node, segment, seekContext, stack);
     if (!childNode) {
       return undefined;
     }
@@ -547,15 +532,11 @@ function hasChildrenOrData<I, V>(node: Node<I, V>) {
   return false;
 }
 
-function cleanUp<I, V>(node: Node<I, V>, stack) {
-  if (!hasChildrenOrData(node)) {
-    while (stack.length) {
-      const [segment, node] = stack.pop()!;
-      node.delete(segment);
-      if (hasChildrenOrData(node)) {
-        break;
-      }
-    }
+function cleanUp<I, V>(node: Node<I, V>, stack: Stack<I, V>) {
+  while (!hasChildrenOrData(node) && stack.length) {
+    const [segment, parentNode] = stack.pop()!;
+    parentNode.delete(segment as I);
+    node = parentNode;
   }
   if (
     !node.has(dataSymbol) &&
