@@ -8,11 +8,14 @@ type DataSymbol = typeof dataSymbol;
 type WildcardSymbol = typeof wildcardSymbol;
 type WildcardCountSymbol = typeof wildcardCountSymbol;
 
-type Node<I, V> = Map<I, Node<I, V>> &
-  Map<WildcardSymbol, CountNode<I, V>> &
-  Map<DataSymbol, V>;
+type WildcardCountNode<I, V> = Map<WildcardCountSymbol, number> & Node<I, V>;
+type WildcardNode<I, V> = Map<WildcardSymbol, WildcardCountNode<I, V>>;
+type RegularNode<I, V> = Map<I, Node<I, V>>;
+type OuterNode<V> = Map<DataSymbol, V>;
+type InnerNode<I, V> = WildcardNode<I, V> & RegularNode<I, V>;
+type Node<I, V> = InnerNode<I, V> & OuterNode<V>;
 
-type CountNode<I, V> = Map<WildcardCountSymbol, number> & Node<I, V>;
+type Stack<I, V> = [I | WildcardSymbol, Node<I, V>][];
 
 interface SeekContext<I, V> {
   parentNode?: Node<I, V>;
@@ -40,11 +43,13 @@ export class Trie<I, V> {
     for await (const [key, value] of initialEntries) {
       await this.set(key, value);
     }
+    return this;
   }
   addSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]> = []) {
     for (const [key, value] of initialEntries) {
       this.setSync(key, value);
     }
+    return this;
   }
   async set(path: AnyIterable<I | WildcardSegment>, value: V) {
     const node = await hardSeek(this.#root, path);
@@ -101,42 +106,38 @@ export class Trie<I, V> {
     return softSeekSync(this.#root, path)?.get(dataSymbol);
   }
   async delete(path: AnyIterable<I | WildcardSegment>) {
-    const stack: [I, Node<I, V>][] = [];
+    const stack: Stack<I, V> = [];
     const node = await softSeek(this.#root, path, stack);
     if (!node) {
       return false;
     }
     node.delete(dataSymbol);
     --this.#size;
-    if (node.size) {
-      return true;
-    }
-    for (const [segment, node] of stack) {
-      node.delete(segment);
-      if (node.size) {
-        return true;
+    if (!hasChildrenOrData(node)) {
+      while (stack.length) {
+        const [segment, node] = stack.pop()!;
+        node.delete(segment);
+        if (hasChildrenOrData(node)) {
+          break;
+        }
       }
+    }
+    if (
+      !node.has(dataSymbol) &&
+      node.has(wildcardSymbol) &&
+      isWildcardCountNode(node)
+    ) {
+      const childNode = node.get(wildcardSymbol)!;
+      childNode.set(
+        wildcardCountSymbol,
+        childNode.get(wildcardCountSymbol)! + node.get(wildcardCountSymbol)!,
+      );
+      const [, parentNode] = stack.pop()!;
+      parentNode.set(wildcardSymbol, childNode);
     }
     return true;
   }
   // deleteSync(path: Iterable<I | WildcardSegment>) {
-  //   const stack: [I, Node<I, V>][] = [];
-  //   const node = this.#seekSync(path, stack);
-  //   if (!node) {
-  //     return false;
-  //   }
-  //   node.delete(dataSymbol);
-  //   --this.#size;
-  //   if (node.size) {
-  //     return true;
-  //   }
-  //   for (const [segment, node] of stack) {
-  //     node.delete(segment);
-  //     if (node.size) {
-  //       return true;
-  //     }
-  //   }
-  //   return true;
   // }
   clear() {
     this.#root.clear();
@@ -360,8 +361,10 @@ function isWildcardSegment(segment: unknown): segment is WildcardSegment {
   /* void */
 }
 
-function isCountNode<I, V>(node: Node<I, V>): node is CountNode<I, V> {
-  return (node as CountNode<I, V>).has(wildcardCountSymbol);
+function isWildcardCountNode<I, V>(
+  node: Node<I, V>,
+): node is WildcardCountNode<I, V> {
+  return (node as WildcardCountNode<I, V>).has(wildcardCountSymbol);
 }
 
 function hardSeekResolve<I, V>(
@@ -371,15 +374,15 @@ function hardSeekResolve<I, V>(
   if (seekContext.nodeWildcardCount < seekContext.pathWildcardCount) {
     const diffCount =
       seekContext.pathWildcardCount - seekContext.nodeWildcardCount;
-    const nextNode = new Map() as CountNode<I, V>;
+    const nextNode = new Map() as WildcardCountNode<I, V>;
     nextNode.set(wildcardCountSymbol, diffCount);
     node.set(wildcardSymbol, nextNode);
     node = nextNode;
   } else if (seekContext.nodeWildcardCount > seekContext.pathWildcardCount) {
-    assumeAs<CountNode<I, V>>(node);
+    assumeAs<WildcardCountNode<I, V>>(node);
     const diffCount =
       seekContext.nodeWildcardCount - seekContext.pathWildcardCount;
-    const nextNode = new Map() as CountNode<I, V>;
+    const nextNode = new Map() as WildcardCountNode<I, V>;
     nextNode.set(
       wildcardCountSymbol,
       node.get(wildcardCountSymbol)! - diffCount,
@@ -456,7 +459,7 @@ function softSeekImpl<I, V>(
   node: Node<I, V>,
   segment: I | WildcardSegment,
   seekContext: SeekContext<I, V>,
-  stack?: [I | WildcardSegment, Node<I, V>][],
+  stack?: Stack<I, V>,
 ) {
   if (!isWildcardSegment(segment)) {
     if (seekContext.nodeWildcardCount !== seekContext.pathWildcardCount) {
@@ -468,7 +471,7 @@ function softSeekImpl<I, V>(
       stack?.splice(0, stack.length);
       return undefined;
     }
-    stack?.unshift([segment, node]);
+    stack?.push([segment, node]);
     return childNode;
   }
   seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
@@ -478,7 +481,7 @@ function softSeekImpl<I, V>(
   ) {
     const childNode = node.get(wildcardSymbol)!;
     seekContext.nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
-    stack?.unshift([segment, node]);
+    stack?.push([segment, node]);
     node = childNode;
   }
   return node;
@@ -487,7 +490,7 @@ function softSeekImpl<I, V>(
 async function softSeek<I, V>(
   root: Node<I, V>,
   path: AnyIterable<I | WildcardSegment>,
-  stack?: [I | WildcardSegment, Node<I, V>][],
+  stack?: Stack<I, V>,
 ) {
   let node = root;
   const seekContext: SeekContext<I, V> = {
@@ -511,7 +514,7 @@ async function softSeek<I, V>(
 function softSeekSync<I, V>(
   root: Node<I, V>,
   path: Iterable<I | WildcardSegment>,
-  stack?: [I | WildcardSegment, Node<I, V>][],
+  stack?: Stack<I, V>,
 ) {
   let node = root;
   const seekContext: SeekContext<I, V> = {
@@ -530,4 +533,41 @@ function softSeekSync<I, V>(
     return undefined;
   }
   return node;
+}
+
+function hasChildrenOrData<I, V>(node: Node<I, V>) {
+  if (node.has(dataSymbol)) {
+    return true;
+  }
+  for (const key of node.keys()) {
+    if (key !== wildcardCountSymbol) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function cleanUp<I, V>(node: Node<I, V>, stack) {
+  if (!hasChildrenOrData(node)) {
+    while (stack.length) {
+      const [segment, node] = stack.pop()!;
+      node.delete(segment);
+      if (hasChildrenOrData(node)) {
+        break;
+      }
+    }
+  }
+  if (
+    !node.has(dataSymbol) &&
+    node.has(wildcardSymbol) &&
+    isWildcardCountNode(node)
+  ) {
+    const childNode = node.get(wildcardSymbol)!;
+    childNode.set(
+      wildcardCountSymbol,
+      childNode.get(wildcardCountSymbol)! + node.get(wildcardCountSymbol)!,
+    );
+    const [, parentNode] = stack.pop()!;
+    parentNode.set(wildcardSymbol, childNode);
+  }
 }
