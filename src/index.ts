@@ -11,9 +11,9 @@ type WildcardCountSymbol = typeof wildcardCountSymbol;
 type WildcardCountNode<I, V> = Map<WildcardCountSymbol, number> & Node<I, V>;
 type WildcardNode<I, V> = Map<WildcardSymbol, WildcardCountNode<I, V>>;
 type RegularNode<I, V> = Map<I, Node<I, V>>;
-type OuterNode<V> = Map<DataSymbol, V>;
-type InnerNode<I, V> = WildcardNode<I, V> & RegularNode<I, V>;
-type Node<I, V> = InnerNode<I, V> & OuterNode<V>;
+type BranchNode<V> = Map<DataSymbol, V>;
+type LeafNode<I, V> = WildcardNode<I, V> & RegularNode<I, V>;
+type Node<I, V> = LeafNode<I, V> & BranchNode<V>;
 
 type Stack<I, V> = [I | WildcardSymbol, Node<I, V>][];
 
@@ -132,85 +132,105 @@ export class Trie<I, V> {
     this.#size = 0;
     return;
   }
-  // async *#branchOut(
-  //   node: Node<I | WildcardSegment, V>,
-  //   pathIterator: AsyncIterator<I> | Iterator<I>,
-  // ): AsyncGenerator<V | undefined, void, unknown> {
-  //   // yield data
-  //   if (node.has(dataSymbol)) {
-  //     yield node.get(dataSymbol);
-  //   }
-  //   const { value, done } = await pathIterator.next();
-  //   if (done) {
-  //     return;
-  //   }
-  //   // find matched node
-  //   const nextNodeWildcard = node.get(Wildcard);
-  //   const nextNodeExact = node.get(value);
-  //   // wildcard match only
-  //   if (nextNodeWildcard && !nextNodeExact) {
-  //     yield* this.#branchOut(nextNodeWildcard, pathIterator);
-  //   }
-  //   // exact match only
-  //   else if (!nextNodeWildcard && nextNodeExact) {
-  //     yield* this.#branchOut(nextNodeExact, pathIterator);
-  //   }
-  //   // both, we need to tee the path iterator
-  //   else if (nextNodeWildcard && nextNodeExact) {
-  //     const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
-  //     yield* this.#branchOut(nextNodeWildcard, pathIterator2);
-  //     yield* this.#branchOut(nextNodeExact, pathIterator1);
-  //   }
-  //   // none
-  //   else {
-  //     return;
-  //   }
-  // }
-  // *#branchOutSync(
-  //   node: Node<I | WildcardSegment, V>,
-  //   pathIterator: Iterator<I>,
-  // ): Generator<V | undefined, void, unknown> {
-  //   // yield data
-  //   if (node.has(dataSymbol)) {
-  //     yield node.get(dataSymbol);
-  //   }
-  //   const { value, done } = pathIterator.next();
-  //   if (done) {
-  //     return;
-  //   }
-  //   // find matched node
-  //   const nextNodeWildcard = node.get(Wildcard);
-  //   const nextNodeExact = node.get(value);
-  //   // wildcard match only
-  //   if (nextNodeWildcard && !nextNodeExact) {
-  //     yield* this.#branchOutSync(nextNodeWildcard, pathIterator);
-  //   }
-  //   // exact match only
-  //   else if (!nextNodeWildcard && nextNodeExact) {
-  //     yield* this.#branchOutSync(nextNodeExact, pathIterator);
-  //   }
-  //   // both, we need to tee the path iterator
-  //   else if (nextNodeWildcard && nextNodeExact) {
-  //     const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
-  //     yield* this.#branchOutSync(nextNodeWildcard, pathIterator2);
-  //     yield* this.#branchOutSync(nextNodeExact, pathIterator1);
-  //   }
-  //   // none
-  //   else {
-  //     return;
-  //   }
-  // }
-  // async *find(path: AnyIterable<I>) {
-  //   const pathIterator =
-  //     Symbol.asyncIterator in path
-  //       ? path[Symbol.asyncIterator]()
-  //       : path[Symbol.iterator]();
-  //   yield* this.#branchOut(this.#rootNode, pathIterator);
-  // }
-  // *findSync(path: Iterable<I>) {
-  //   const pathIterator = path[Symbol.iterator]();
-  //   yield* this.#branchOutSync(this.#rootNode, pathIterator);
-  // }
+  async *#branchOut(
+    node: Node<I, V>,
+    pathIterator: AsyncIterator<I> | Iterator<I>,
+  ): AsyncGenerator<V | undefined, void, unknown> {
+    // wildcard
+    if (isWildcardCountNode(node)) {
+      const wildcardCount = node.get(wildcardCountSymbol)!;
+      for (let i = 0; i < wildcardCount; ++i) {
+        const { done } = await pathIterator.next();
+        if (done) {
+          return;
+        }
+      }
+    }
+    // yield data
+    if (node.has(dataSymbol)) {
+      yield node.get(dataSymbol);
+    }
+    const { value, done } = await pathIterator.next();
+    if (done) {
+      return;
+    }
+    // find matched node
+    const nextWildcardNode = node.get(wildcardSymbol);
+    const nextRegularNode = node.get(value);
+    // wildcard match only
+    if (nextWildcardNode && !nextRegularNode) {
+      yield* this.#branchOut(nextWildcardNode, pathIterator);
+    }
+    // regular match only
+    else if (!nextWildcardNode && nextRegularNode) {
+      yield* this.#branchOut(nextRegularNode, pathIterator);
+    }
+    // both, we need to tee the path iterator
+    else if (nextWildcardNode && nextRegularNode) {
+      const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
+      yield* this.#branchOut(nextWildcardNode, pathIterator1);
+      yield* this.#branchOut(nextRegularNode, pathIterator2);
+    }
+    // none
+    else {
+      return;
+    }
+  }
+  *#branchOutSync(
+    node: Node<I, V>,
+    pathIterator: Iterator<I>,
+  ): Generator<V | undefined, void, unknown> {
+    // wildcard
+    if (isWildcardCountNode(node)) {
+      const wildcardCount = node.get(wildcardCountSymbol)!;
+      for (let i = 0; i < wildcardCount; ++i) {
+        const { done } = pathIterator.next();
+        if (done) {
+          return;
+        }
+      }
+    }
+    // yield data
+    if (node.has(dataSymbol)) {
+      yield node.get(dataSymbol);
+    }
+    const { value, done } = pathIterator.next();
+    if (done) {
+      return;
+    }
+    // find matched node
+    const nextWildcardNode = node.get(wildcardSymbol);
+    const nextRegularNode = node.get(value);
+    // wildcard match only
+    if (nextWildcardNode && !nextRegularNode) {
+      yield* this.#branchOutSync(nextWildcardNode, pathIterator);
+    }
+    // regular match only
+    else if (!nextWildcardNode && nextRegularNode) {
+      yield* this.#branchOutSync(nextRegularNode, pathIterator);
+    }
+    // both, we need to tee the path iterator
+    else if (nextWildcardNode && nextRegularNode) {
+      const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
+      yield* this.#branchOutSync(nextWildcardNode, pathIterator1);
+      yield* this.#branchOutSync(nextRegularNode, pathIterator2);
+    }
+    // none
+    else {
+      return;
+    }
+  }
+  async *find(path: AnyIterable<I>) {
+    const pathIterator =
+      Symbol.asyncIterator in path
+        ? path[Symbol.asyncIterator]()
+        : path[Symbol.iterator]();
+    yield* this.#branchOut(this.#root, pathIterator);
+  }
+  *findSync(path: Iterable<I>) {
+    const pathIterator = path[Symbol.iterator]();
+    yield* this.#branchOutSync(this.#root, pathIterator);
+  }
   get size() {
     return this.#size;
   }
@@ -224,7 +244,7 @@ export class Trie<I, V> {
  * See: MattiasBuelens/web-streams-polyfill#80
  */
 
-export function teeIterator<T>(iterator: AsyncIterator<T> | Iterator<T>) {
+function teeIterator<T>(iterator: AsyncIterator<T> | Iterator<T>) {
   interface LinkedListNode<T> {
     value: T;
     next: LinkedListNode<T> | undefined;
@@ -287,7 +307,7 @@ export function teeIterator<T>(iterator: AsyncIterator<T> | Iterator<T>) {
   return [branch(0, buffer), branch(1, buffer)] as const;
 }
 
-export function teeIteratorSync<T>(iterator: Iterator<T>) {
+function teeIteratorSync<T>(iterator: Iterator<T>) {
   interface LinkedListNode<T> {
     value: T;
     next: LinkedListNode<T> | undefined;
