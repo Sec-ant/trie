@@ -180,10 +180,8 @@ export class Trie<I, V> {
     node: Node<I, V>,
     pathIterator: Iterator<I>,
   ): Generator<V | undefined, void, unknown> {
-    // wildcard
     if (isWildcardCountNode(node)) {
-      const wildcardCount = node.get(wildcardCountSymbol)!;
-      for (let i = 0; i < wildcardCount; ++i) {
+      for (let i = 0; i < node.get(wildcardCountSymbol)! - 1; ++i) {
         const { done } = pathIterator.next();
         if (done) {
           return;
@@ -199,21 +197,21 @@ export class Trie<I, V> {
       return;
     }
     // find matched node
-    const nextWildcardNode = node.get(wildcardSymbol);
-    const nextRegularNode = node.get(value);
+    const childNode1 = node.get(wildcardSymbol);
+    const childNode2 = node.get(value);
     // wildcard match only
-    if (nextWildcardNode && !nextRegularNode) {
-      yield* this.#branchOutSync(nextWildcardNode, pathIterator);
+    if (childNode1 && !childNode2) {
+      yield* this.#branchOutSync(childNode1, pathIterator);
     }
     // regular match only
-    else if (!nextWildcardNode && nextRegularNode) {
-      yield* this.#branchOutSync(nextRegularNode, pathIterator);
+    else if (!childNode1 && childNode2) {
+      yield* this.#branchOutSync(childNode2, pathIterator);
     }
     // both, we need to tee the path iterator
-    else if (nextWildcardNode && nextRegularNode) {
+    else if (childNode1 && childNode2) {
       const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
-      yield* this.#branchOutSync(nextWildcardNode, pathIterator1);
-      yield* this.#branchOutSync(nextRegularNode, pathIterator2);
+      yield* this.#branchOutSync(childNode1, pathIterator1);
+      yield* this.#branchOutSync(childNode2, pathIterator2);
     }
     // none
     else {
