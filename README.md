@@ -1,1 +1,1 @@
-# @sec-ant/vanilla-ts
+# @sec-ant/trie

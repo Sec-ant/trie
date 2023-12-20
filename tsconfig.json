@@ -4,7 +4,7 @@
     "useDefineForClassFields": true,
     "module": "NodeNext",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": [],
+    "types": ["vitest/importMeta"],
     "skipLibCheck": true,
     "moduleResolution": "NodeNext",
     "resolveJsonModule": true,

@@ -1,8 +1,8 @@
 {
-  "name": "@sec-ant/vanilla-ts",
-  "description": "A Vite vanilla-ts template for browser es modules",
+  "name": "@sec-ant/trie",
+  "description": "A Trie structure that supports wildcards",
   "private": false,
-  "version": "0.0.8",
+  "version": "0.1.0",
   "type": "module",
   "files": [
     "./dist"
@@ -15,21 +15,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Sec-ant/vanilla-ts.git"
+    "url": "git+https://github.com/Sec-ant/trie.git"
   },
-  "homepage": "https://github.com/Sec-ant/vanilla-ts",
+  "homepage": "https://github.com/Sec-ant/trie",
   "bugs": {
-    "url": "https://github.com/Sec-ant/vanilla-ts/issues",
+    "url": "https://github.com/Sec-ant/trie/issues",
     "email": "zzwu@zju.edu.cn"
   },
   "keywords": [
-    "vite",
-    "template",
-    "vite-template",
-    "vanilla",
-    "typescript",
-    "vanilla-ts",
-    "lib"
+    "trie"
   ],
   "author": {
     "name": "Ze-Zheng Wu"
@@ -59,18 +53,19 @@
     "@commitlint/cli": "^18.4.3",
     "@commitlint/config-conventional": "^18.4.3",
     "@semantic-release/git": "^10.0.1",
-    "@typescript-eslint/eslint-plugin": "^6.13.1",
-    "@typescript-eslint/parser": "^6.13.1",
-    "@vitest/browser": "^1.0.4",
-    "@vitest/coverage-istanbul": "^1.0.4",
-    "@vitest/ui": "^1.0.4",
-    "eslint": "^8.54.0",
-    "npm-check-updates": "^16.14.11",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vitest/browser": "^1.1.0",
+    "@vitest/coverage-istanbul": "^1.1.0",
+    "@vitest/ui": "^1.1.0",
+    "esbuild": "^0.19.10",
+    "eslint": "^8.56.0",
+    "npm-check-updates": "^16.14.12",
     "playwright": "^1.40.1",
-    "prettier": "^3.1.0",
-    "semantic-release": "^22.0.8",
-    "typescript": "^5.3.2",
-    "vite": "^5.0.3",
-    "vitest": "^1.0.4"
+    "prettier": "^3.1.1",
+    "semantic-release": "^22.0.12",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "vitest": "^1.1.0"
   }
 }
