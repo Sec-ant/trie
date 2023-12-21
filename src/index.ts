@@ -125,7 +125,7 @@ export class Trie<I, V> {
    * @returns A Promise that resolves to the Trie instance.
    */
   async add(
-    initialEntries: AnyIterable<[AnyIterable<I | WildcardSegment>, V]> = [],
+    initialEntries: AnyIterable<[AnyIterable<I | WildcardSegment>, V]>,
   ) {
     for await (const [key, value] of initialEntries) {
       await this.set(key, value);
@@ -137,7 +137,7 @@ export class Trie<I, V> {
    * @param initialEntries - The optional initial entries to add to the Trie.
    * @returns The Trie instance.
    */
-  addSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]> = []) {
+  addSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]>) {
     for (const [key, value] of initialEntries) {
       this.setSync(key, value);
     }
@@ -301,12 +301,14 @@ export class Trie<I, V> {
     const pathIterator = path[Symbol.iterator]();
     yield* branchOutSync(this.#root, pathIterator);
   }
+  // #if DEV
   /**
    * Gets the root node of the Trie.
    */
   get root() {
     return this.#root;
   }
+  // #endif
   /**
    * Gets the size of the Trie, i.e., the number of paths.
    */
@@ -671,7 +673,10 @@ async function softSeek<I, V>(
     }
     node = childNode;
   }
-  if (seekContext.nodeWildcardCount !== seekContext.pathWildcardCount) {
+  if (
+    seekContext.nodeWildcardCount !== seekContext.pathWildcardCount ||
+    !node.has(dataSymbol)
+  ) {
     stack?.splice(0, stack.length);
     return undefined;
   }
@@ -704,7 +709,10 @@ function softSeekSync<I, V>(
     }
     node = childNode;
   }
-  if (seekContext.nodeWildcardCount !== seekContext.pathWildcardCount) {
+  if (
+    seekContext.nodeWildcardCount !== seekContext.pathWildcardCount ||
+    !node.has(dataSymbol)
+  ) {
     stack?.splice(0, stack.length);
     return undefined;
   }
@@ -864,8 +872,10 @@ function* branchOutSync<I, V>(
 }
 
 // in-source tests
+/* istanbul ignore if -- @preserve */
 if (import.meta.vitest) {
   const { it, expect, describe, beforeEach } = import.meta.vitest;
+  const clone = (await import("just-clone")).default;
 
   describe("constructor", () => {
     it("initializing an empty Trie", () => {
@@ -1105,10 +1115,10 @@ if (import.meta.vitest) {
   });
 
   describe("set and setSync method", () => {
-    let trie: Trie<number, string>;
+    let trie: Trie<number, string | undefined>;
 
     beforeEach(() => {
-      trie = new Trie<number, string>();
+      trie = new Trie<number, string | undefined>();
     });
 
     describe("setting a value for a new path", () => {
@@ -1120,6 +1130,36 @@ if (import.meta.vitest) {
       };
 
       const value = "value1";
+
+      const root = new Map([
+        [1, new Map([[2, new Map([[dataSymbol, value]])]])],
+      ]);
+
+      it("set(syncPath, value)", async () => {
+        await trie.set(syncPath, value);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("set(asyncPath, value)", async () => {
+        await trie.set(asyncPathGenerator(), value);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("setSync(syncPath, value)", () => {
+        trie.setSync(syncPath, value);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
+
+    describe("setting undefined for a new path", () => {
+      const syncPath = [1, 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield 2;
+      };
+
+      const value = undefined;
 
       const root = new Map([
         [1, new Map([[2, new Map([[dataSymbol, value]])]])],
@@ -1304,6 +1344,61 @@ if (import.meta.vitest) {
       });
     });
 
+    describe("setting a value for a path with an equivalent wildcard count", () => {
+      const syncPath1 = [1, w(5)];
+      const syncPath2 = [1, w(), w(), w(), w(), w()];
+
+      const asyncPathGenerator1 = async function* () {
+        yield 1;
+        yield w(5);
+      };
+
+      const asyncPathGenerator2 = async function* () {
+        yield 1;
+        yield w();
+        yield w();
+        yield w();
+        yield w();
+        yield w();
+      };
+
+      const value1 = "value1";
+      const value2 = "value2";
+
+      const root = new Map([
+        [
+          1,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [dataSymbol, value2],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      it("set(syncPath, value)", async () => {
+        await trie.set(syncPath1, value1);
+        await trie.set(syncPath2, value2);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("set(asyncPath, value)", async () => {
+        await trie.set(asyncPathGenerator1(), value1);
+        await trie.set(asyncPathGenerator2(), value2);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("setSync(syncPath, value)", () => {
+        trie.setSync(syncPath1, value1);
+        trie.setSync(syncPath2, value2);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
+
     describe("setting values for paths with common wildcard branches, short branch then long branch", () => {
       const syncPath1 = [1, w(2)];
       const syncPath2 = [1, w(5)];
@@ -1418,57 +1513,42 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("setting a value for a path with an equivalent wildcard count", () => {
-      const syncPath1 = [1, w(5)];
-      const syncPath2 = [1, w(), w(), w(), w(), w()];
+    describe("chaining", () => {
+      const syncPath1 = [1, 2];
+      const syncPath2 = [3, 4];
 
       const asyncPathGenerator1 = async function* () {
         yield 1;
-        yield w(5);
+        yield 2;
       };
 
       const asyncPathGenerator2 = async function* () {
-        yield 1;
-        yield w();
-        yield w();
-        yield w();
-        yield w();
-        yield w();
+        yield 3;
+        yield 4;
       };
 
       const value1 = "value1";
       const value2 = "value2";
 
       const root = new Map([
-        [
-          1,
-          new Map([
-            [
-              wildcardSymbol,
-              new Map<unknown, unknown>([
-                [wildcardCountSymbol, 5],
-                [dataSymbol, value2],
-              ]),
-            ],
-          ]),
-        ],
+        [1, new Map([[2, new Map([[dataSymbol, value1]])]])],
+        [3, new Map([[4, new Map([[dataSymbol, value2]])]])],
       ]);
 
       it("set(syncPath, value)", async () => {
-        await trie.set(syncPath1, value1);
-        await trie.set(syncPath2, value2);
+        await (await trie.set(syncPath1, value1)).set(syncPath2, value2);
         expect(trie.root).toStrictEqual(root);
       });
 
       it("set(asyncPath, value)", async () => {
-        await trie.set(asyncPathGenerator1(), value1);
-        await trie.set(asyncPathGenerator2(), value2);
+        await (
+          await trie.set(asyncPathGenerator1(), value1)
+        ).set(asyncPathGenerator2(), value2);
         expect(trie.root).toStrictEqual(root);
       });
 
       it("setSync(syncPath, value)", () => {
-        trie.setSync(syncPath1, value1);
-        trie.setSync(syncPath2, value2);
+        trie.setSync(syncPath1, value1).setSync(syncPath2, value2);
         expect(trie.root).toStrictEqual(root);
       });
     });
@@ -1625,15 +1705,66 @@ if (import.meta.vitest) {
         expect(trie.root).toStrictEqual(root);
       });
     });
+
+    describe("chaining", () => {
+      const syncPath1 = [1, 2];
+      const syncPath2 = [3, 4];
+
+      const asyncPathGenerator1 = async function* () {
+        yield 1;
+        yield 2;
+      };
+
+      const asyncPathGenerator2 = async function* () {
+        yield 3;
+        yield 4;
+      };
+
+      const value1 = 1;
+      const value2 = 2;
+
+      const syncValueCallback1 = () => value1;
+      const syncValueCallback2 = () => value2;
+
+      const asyncValueCallback1 = async () => value1;
+      const asyncValueCallback2 = async () => value2;
+
+      const root = new Map([
+        [1, new Map([[2, new Map([[dataSymbol, value1]])]])],
+        [3, new Map([[4, new Map([[dataSymbol, value2]])]])],
+      ]);
+
+      it("setCallback(syncPath, syncValueCallback)", async () => {
+        await (
+          await trie.setCallback(syncPath1, syncValueCallback1)
+        ).setCallback(syncPath2, syncValueCallback2);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("setCallback(asyncPath, asyncValueCallback)", async () => {
+        await (
+          await trie.setCallback(asyncPathGenerator1(), asyncValueCallback1)
+        ).setCallback(asyncPathGenerator2(), asyncValueCallback2);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("setCallbackSync(syncPath, syncValueCallback)", () => {
+        trie
+          .setCallbackSync(syncPath1, syncValueCallback1)
+          .setCallbackSync(syncPath2, syncValueCallback2);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
   });
 
   describe("has and hasSync method", () => {
-    let trie: Trie<number, string>;
+    let trie: Trie<number, string | undefined>;
 
     beforeEach(() => {
-      trie = new Trie<number, string>([
+      trie = new Trie<number, string | undefined>([
         [[1, 2], "value1"],
-        [[1, w(5)], "value2"],
+        [[2, 2], undefined],
+        [[1, w(5), 2], "value2"],
         [[1, w(10)], "value3"],
       ]);
     });
@@ -1643,6 +1774,27 @@ if (import.meta.vitest) {
 
       const asyncPathGenerator = async function* () {
         yield 1;
+        yield 2;
+      };
+
+      it("has(syncPath)", async () => {
+        expect(await trie.has(syncPath)).toBe(true);
+      });
+
+      it("has(asyncPath)", async () => {
+        expect(await trie.has(asyncPathGenerator())).toBe(true);
+      });
+
+      it("hasSync(syncPath)", () => {
+        expect(trie.hasSync(syncPath)).toBe(true);
+      });
+    });
+
+    describe("checking an existing path with an undefined value", () => {
+      const syncPath = [2, 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 2;
         yield 2;
       };
 
@@ -1680,12 +1832,56 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("checking an existing path with wildcards (count)", () => {
+    describe("checking a non-existing path with wildcards (partial match)", () => {
       const syncPath = [1, w(5)];
 
       const asyncPathGenerator = async function* () {
         yield 1;
         yield w(5);
+      };
+
+      it("has(syncPath)", async () => {
+        expect(await trie.has(syncPath)).toBe(false);
+      });
+
+      it("has(asyncPath)", async () => {
+        expect(await trie.has(asyncPathGenerator())).toBe(false);
+      });
+
+      it("hasSync(syncPath)", () => {
+        expect(trie.hasSync(syncPath)).toBe(false);
+      });
+    });
+
+    describe("checking a non-existing path with wildcards (unmatched count)", () => {
+      const syncPath = [1, w(6), 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(6);
+        yield 2;
+      };
+
+      it("has(syncPath)", async () => {
+        expect(await trie.has(syncPath)).toBe(false);
+      });
+
+      it("has(asyncPath)", async () => {
+        expect(await trie.has(asyncPathGenerator())).toBe(false);
+      });
+
+      it("hasSync(syncPath)", () => {
+        expect(trie.hasSync(syncPath)).toBe(false);
+      });
+    });
+
+    describe("checking an existing path with wildcards (count)", () => {
+      const syncPath = [1, w(5), 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(5);
+        yield 2;
       };
 
       it("has(syncPath)", async () => {
@@ -1702,7 +1898,7 @@ if (import.meta.vitest) {
     });
 
     describe("checking an existing path with wildcards (literal)", () => {
-      const syncPath = [1, w(), w(), w(), w(), w()];
+      const syncPath = [1, w(), w(), w(), w(), w(), 2];
 
       const asyncPathGenerator = async function* () {
         yield 1;
@@ -1711,6 +1907,7 @@ if (import.meta.vitest) {
         yield w();
         yield w();
         yield w();
+        yield 2;
       };
 
       it("has(syncPath)", async () => {
@@ -1747,34 +1944,61 @@ if (import.meta.vitest) {
       });
     });
 
+    // TODO: wrong implementation
     describe("having no side effects", () => {
       let root1: Map<unknown, unknown>;
 
       beforeEach(() => {
-        root1 = trie.root;
+        root1 = clone(trie.root);
       });
 
       const syncPath1 = [1, 2];
-      const syncPath2 = [1, 3];
-      const syncPath3 = [1, w(10)];
+      const syncPath2 = [2, 2];
+      const syncPath3 = [1, w(5), 2];
+      const syncPath4 = [1, w(10)];
+      const syncPath5 = [1, 3];
+      const syncPath6 = [1, w(5)];
+      const syncPath7 = [1, w(6), 2];
 
       const asyncPathGenerator1 = async function* () {
         yield 1;
         yield 2;
       };
       const asyncPathGenerator2 = async function* () {
-        yield 1;
-        yield 3;
+        yield 2;
+        yield 2;
       };
       const asyncPathGenerator3 = async function* () {
         yield 1;
+        yield w(5);
+        yield 2;
+      };
+      const asyncPathGenerator4 = async function* () {
+        yield 1;
         yield w(10);
+      };
+      const asyncPathGenerator5 = async function* () {
+        yield 1;
+        yield 3;
+      };
+      const asyncPathGenerator6 = async function* () {
+        yield 1;
+        yield w(5);
+      };
+      const asyncPathGenerator7 = async function* () {
+        yield 1;
+        yield w(6);
+        yield 2;
       };
 
       it("has(syncPath)", async () => {
         await trie.has(syncPath1);
         await trie.has(syncPath2);
         await trie.has(syncPath3);
+        await trie.has(syncPath4);
+        await trie.has(syncPath5);
+        await trie.has(syncPath6);
+        await trie.has(syncPath7);
         expect(trie.root).toStrictEqual(root1);
       });
 
@@ -1782,6 +2006,10 @@ if (import.meta.vitest) {
         await trie.has(asyncPathGenerator1());
         await trie.has(asyncPathGenerator2());
         await trie.has(asyncPathGenerator3());
+        await trie.has(asyncPathGenerator4());
+        await trie.has(asyncPathGenerator5());
+        await trie.has(asyncPathGenerator6());
+        await trie.has(asyncPathGenerator7());
         expect(trie.root).toStrictEqual(root1);
       });
 
@@ -1789,7 +2017,823 @@ if (import.meta.vitest) {
         trie.has(syncPath1);
         trie.has(syncPath2);
         trie.has(syncPath3);
+        trie.has(syncPath4);
+        trie.has(syncPath5);
+        trie.has(syncPath6);
+        trie.has(syncPath7);
         expect(trie.root).toStrictEqual(root1);
+      });
+    });
+  });
+
+  describe("get and getSync method", () => {
+    let trie: Trie<number, string | undefined>;
+
+    beforeEach(() => {
+      trie = new Trie<number, string | undefined>([
+        [[1, 2], "value1"],
+        [[2, 2], undefined],
+        [[1, w(5), 2], "value2"],
+        [[1, w(10)], "value3"],
+      ]);
+    });
+
+    describe("getting an existing path", () => {
+      const syncPath = [1, 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield 2;
+      };
+
+      const value = "value1";
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe(value);
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe(value);
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe(value);
+      });
+    });
+
+    describe("getting an existing path with an undefined value", () => {
+      const syncPath = [2, 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 2;
+        yield 2;
+      };
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe(undefined);
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe(undefined);
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe(undefined);
+      });
+    });
+
+    describe("getting a non-existing path", () => {
+      const syncPath = [1, 3];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield 3;
+      };
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe(undefined);
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe(undefined);
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe(undefined);
+      });
+    });
+
+    describe("getting a non-existing path with wildcards (partial match)", () => {
+      const syncPath = [1, w(5)];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(5);
+      };
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe(undefined);
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe(undefined);
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe(undefined);
+      });
+    });
+
+    describe("getting a non-existing path with wildcards (unmatched count)", () => {
+      const syncPath = [1, w(6), 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(6);
+        yield 2;
+      };
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe(undefined);
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe(undefined);
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe(undefined);
+      });
+    });
+
+    describe("getting an existing path with wildcards (count)", () => {
+      const syncPath = [1, w(5), 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(5);
+        yield 2;
+      };
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe("value2");
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe("value2");
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe("value2");
+      });
+    });
+
+    describe("getting an existing path with wildcards (literal)", () => {
+      const syncPath = [1, w(), w(), w(), w(), w(), 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w();
+        yield w();
+        yield w();
+        yield w();
+        yield w();
+        yield 2;
+      };
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe("value2");
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe("value2");
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe("value2");
+      });
+    });
+
+    describe("getting an existing path with splitted wildcard paths", () => {
+      const syncPath = [1, w(10)];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(10);
+      };
+
+      it("get(syncPath)", async () => {
+        expect(await trie.get(syncPath)).toBe("value3");
+      });
+
+      it("get(asyncPath)", async () => {
+        expect(await trie.get(asyncPathGenerator())).toBe("value3");
+      });
+
+      it("getSync(syncPath)", () => {
+        expect(trie.getSync(syncPath)).toBe("value3");
+      });
+    });
+
+    describe("having no side effects", () => {
+      let root1: Map<unknown, unknown>;
+
+      beforeEach(() => {
+        root1 = clone(trie.root);
+      });
+
+      const syncPath1 = [1, 2];
+      const syncPath2 = [2, 2];
+      const syncPath3 = [1, w(5), 2];
+      const syncPath4 = [1, w(10)];
+      const syncPath5 = [1, 3];
+      const syncPath6 = [1, w(5)];
+      const syncPath7 = [1, w(6), 2];
+
+      const asyncPathGenerator1 = async function* () {
+        yield 1;
+        yield 2;
+      };
+      const asyncPathGenerator2 = async function* () {
+        yield 2;
+        yield 2;
+      };
+      const asyncPathGenerator3 = async function* () {
+        yield 1;
+        yield w(5);
+        yield 2;
+      };
+      const asyncPathGenerator4 = async function* () {
+        yield 1;
+        yield w(10);
+      };
+      const asyncPathGenerator5 = async function* () {
+        yield 1;
+        yield 3;
+      };
+      const asyncPathGenerator6 = async function* () {
+        yield 1;
+        yield w(5);
+      };
+      const asyncPathGenerator7 = async function* () {
+        yield 1;
+        yield w(6);
+        yield 2;
+      };
+
+      it("get(syncPath)", async () => {
+        await trie.get(syncPath1);
+        await trie.get(syncPath2);
+        await trie.get(syncPath3);
+        await trie.get(syncPath4);
+        await trie.get(syncPath5);
+        await trie.get(syncPath6);
+        await trie.get(syncPath7);
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("get(asyncPath)", async () => {
+        await trie.get(asyncPathGenerator1());
+        await trie.get(asyncPathGenerator2());
+        await trie.get(asyncPathGenerator3());
+        await trie.get(asyncPathGenerator4());
+        await trie.get(asyncPathGenerator5());
+        await trie.get(asyncPathGenerator6());
+        await trie.get(asyncPathGenerator7());
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("getSync(syncPath)", () => {
+        trie.get(syncPath1);
+        trie.get(syncPath2);
+        trie.get(syncPath3);
+        trie.get(syncPath4);
+        trie.get(syncPath5);
+        trie.get(syncPath6);
+        trie.get(syncPath7);
+        expect(trie.root).toStrictEqual(root1);
+      });
+    });
+  });
+
+  describe("delete and deleteSync method", () => {
+    let trie: Trie<number, string | undefined>;
+
+    beforeEach(() => {
+      trie = new Trie<number, string | undefined>([
+        [[1, 2], "value1"],
+        [[2, 2], undefined],
+        [[1, w(5), 2], "value2"],
+        [[1, w(10)], "value3"],
+        [[3, w(3)], "value4"],
+      ]);
+    });
+
+    describe("deleting an existing path", () => {
+      const syncPath = [1, 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield 2;
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+                [
+                  wildcardSymbol,
+                  new Map<unknown, unknown>([
+                    [wildcardCountSymbol, 5],
+                    [dataSymbol, "value3"],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+        [
+          3,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 3],
+                [dataSymbol, "value4"],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
+
+    describe("deleting an existing path to an undefined value", () => {
+      const syncPath = [2, 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 2;
+        yield 2;
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+                [
+                  wildcardSymbol,
+                  new Map<unknown, unknown>([
+                    [wildcardCountSymbol, 5],
+                    [dataSymbol, "value3"],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ],
+        [
+          3,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 3],
+                [dataSymbol, "value4"],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
+
+    describe("deleting a non-existing path", () => {
+      let root1: Map<unknown, unknown>;
+      const syncPath = [1, 3];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield 3;
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+                [
+                  wildcardSymbol,
+                  new Map<unknown, unknown>([
+                    [wildcardCountSymbol, 5],
+                    [dataSymbol, "value3"],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+        [
+          3,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 3],
+                [dataSymbol, "value4"],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      beforeEach(() => {
+        root1 = clone(trie.root);
+      });
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+    });
+
+    describe("deleting a non-existing path with wildcards (partial match)", () => {
+      let root1: Map<unknown, unknown>;
+      const syncPath = [1, w(5)];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(5);
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+                [
+                  wildcardSymbol,
+                  new Map<unknown, unknown>([
+                    [wildcardCountSymbol, 5],
+                    [dataSymbol, "value3"],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+        [
+          3,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 3],
+                [dataSymbol, "value4"],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      beforeEach(() => {
+        root1 = clone(trie.root);
+      });
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+    });
+
+    describe("deleting a non-existing path with wildcards (unmatched count)", () => {
+      let root1: Map<unknown, unknown>;
+      const syncPath = [1, w(6), 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(6);
+        yield 2;
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+                [
+                  wildcardSymbol,
+                  new Map<unknown, unknown>([
+                    [wildcardCountSymbol, 5],
+                    [dataSymbol, "value3"],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+        [
+          3,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 3],
+                [dataSymbol, "value4"],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      beforeEach(() => {
+        root1 = clone(trie.root);
+      });
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(false);
+        expect(trie.root).toStrictEqual(root);
+        expect(trie.root).toStrictEqual(root1);
+      });
+    });
+
+    describe("deleting an existing path with multiple wildcards (count)", () => {
+      const syncPath = [3, w(3)];
+
+      const asyncPathGenerator = async function* () {
+        yield 3;
+        yield w(3);
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+                [
+                  wildcardSymbol,
+                  new Map<unknown, unknown>([
+                    [wildcardCountSymbol, 5],
+                    [dataSymbol, "value3"],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+      ]);
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
+
+    describe("deleting an existing path with multiple wildcards (literal)", () => {
+      const syncPath = [3, w(), w(), w()];
+
+      const asyncPathGenerator = async function* () {
+        yield 3;
+        yield w();
+        yield w();
+        yield w();
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+                [
+                  wildcardSymbol,
+                  new Map<unknown, unknown>([
+                    [wildcardCountSymbol, 5],
+                    [dataSymbol, "value3"],
+                  ]),
+                ],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+      ]);
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
+
+    describe("deleting an existing path with a short branch of wildcards", () => {
+      const syncPath = [1, w(5), 2];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(5);
+        yield 2;
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 10],
+                [dataSymbol, "value3"],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+        [
+          3,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 3],
+                [dataSymbol, "value4"],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+    });
+
+    describe("deleting an existing path with a long branch of wildcards", () => {
+      const syncPath = [1, w(10)];
+
+      const asyncPathGenerator = async function* () {
+        yield 1;
+        yield w(10);
+      };
+
+      const root = new Map([
+        [
+          1,
+          new Map<unknown, unknown>([
+            [2, new Map([[dataSymbol, "value1"]])],
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 5],
+                [2, new Map([[dataSymbol, "value2"]])],
+              ]),
+            ],
+          ]),
+        ],
+        [2, new Map([[2, new Map([[dataSymbol, undefined]])]])],
+        [
+          3,
+          new Map([
+            [
+              wildcardSymbol,
+              new Map<unknown, unknown>([
+                [wildcardCountSymbol, 3],
+                [dataSymbol, "value4"],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      it("delete(syncPath)", async () => {
+        expect(await trie.delete(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("delete(asyncPath)", async () => {
+        expect(await trie.delete(asyncPathGenerator())).toBe(true);
+        expect(trie.root).toStrictEqual(root);
+      });
+
+      it("deleteSync(syncPath)", () => {
+        expect(trie.deleteSync(syncPath)).toBe(true);
+        expect(trie.root).toStrictEqual(root);
       });
     });
   });

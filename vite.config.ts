@@ -1,6 +1,7 @@
 /// <reference types="vitest" />
-import { defineConfig } from "vite";
 import { transform } from "esbuild";
+import PreprocessorDirectives from "unplugin-preprocessor-directives/vite";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   build: {
@@ -14,6 +15,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    { ...PreprocessorDirectives(), apply: "build" },
     {
       name: "minifyEs",
       renderChunk: {
