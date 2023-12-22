@@ -2,7 +2,7 @@
   "name": "@sec-ant/trie",
   "description": "A simple Trie structure with wildcard support to match streams",
   "private": false,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "files": [
     "./dist"
