@@ -282,10 +282,10 @@ export class Trie<I, V> {
   }
   /**
    * Asynchronously searches for values matching a given path.
-   * @param path - The path to search for.
+   * @param path - The path to match against.
    * @returns An asynchronous generator yielding matching values.
    */
-  async *search(path: AnyIterable<I>) {
+  async *match(path: AnyIterable<I>) {
     const pathIterator =
       Symbol.asyncIterator in path
         ? path[Symbol.asyncIterator]()
@@ -294,10 +294,10 @@ export class Trie<I, V> {
   }
   /**
    * Synchronously searches for values matching a given path.
-   * @param path - The path to search for.
+   * @param path - The path to match against.
    * @returns A generator yielding matching values.
    */
-  *searchSync(path: Iterable<I>) {
+  *matchSync(path: Iterable<I>) {
     const pathIterator = path[Symbol.iterator]();
     yield* branchOutSync(this.#root, pathIterator);
   }
@@ -3009,7 +3009,7 @@ if (import.meta.vitest) {
     });
   });
 
-  describe("search and searchSync method", () => {
+  describe("match and matchSync method", () => {
     let trie: Trie<number, symbol | undefined>;
     const v1 = Symbol();
     const v2 = Symbol();
@@ -3027,7 +3027,7 @@ if (import.meta.vitest) {
       ]);
     });
 
-    describe("searching against an existing path", () => {
+    describe("matching against an existing path", () => {
       const syncPath = [1, 2];
 
       const asyncPathGenerator = async function* () {
@@ -3037,27 +3037,27 @@ if (import.meta.vitest) {
 
       const values = [v1];
 
-      it("search(syncPath)", async () => {
+      it("match(syncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(syncPath)) {
+        for await (const result of trie.match(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("search(asyncPath)", async () => {
+      it("match(asyncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(asyncPathGenerator())) {
+        for await (const result of trie.match(asyncPathGenerator())) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("searchSync(syncPath)", () => {
+      it("matchSync(syncPath)", () => {
         let count = 0;
-        for (const result of trie.searchSync(syncPath)) {
+        for (const result of trie.matchSync(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
@@ -3065,7 +3065,7 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("searching against an existing path with undefined value", () => {
+    describe("matching against an existing path with undefined value", () => {
       const syncPath = [2, 2];
 
       const asyncPathGenerator = async function* () {
@@ -3075,27 +3075,27 @@ if (import.meta.vitest) {
 
       const values = [undefined];
 
-      it("search(syncPath)", async () => {
+      it("match(syncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(syncPath)) {
+        for await (const result of trie.match(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("search(asyncPath)", async () => {
+      it("match(asyncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(asyncPathGenerator())) {
+        for await (const result of trie.match(asyncPathGenerator())) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("searchSync(syncPath)", () => {
+      it("matchSync(syncPath)", () => {
         let count = 0;
-        for (const result of trie.searchSync(syncPath)) {
+        for (const result of trie.matchSync(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
@@ -3103,7 +3103,7 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("searching against a non-existing path", () => {
+    describe("matching against a non-existing path", () => {
       const syncPath = [1, 3];
 
       const asyncPathGenerator = async function* () {
@@ -3111,29 +3111,29 @@ if (import.meta.vitest) {
         yield 3;
       };
 
-      it("search(syncPath)", async () => {
-        for await (const _ of trie.search(syncPath)) {
+      it("match(syncPath)", async () => {
+        for await (const _ of trie.match(syncPath)) {
           _;
           expect.unreachable("should be unreachable");
         }
       });
 
-      it("search(asyncPath)", async () => {
-        for await (const _ of trie.search(asyncPathGenerator())) {
+      it("match(asyncPath)", async () => {
+        for await (const _ of trie.match(asyncPathGenerator())) {
           _;
           expect.unreachable("should be unreachable");
         }
       });
 
-      it("searchSync(syncPath)", () => {
-        for (const _ of trie.searchSync(syncPath)) {
+      it("matchSync(syncPath)", () => {
+        for (const _ of trie.matchSync(syncPath)) {
           _;
           expect.unreachable("should be unreachable");
         }
       });
     });
 
-    describe("searching against an existing path with wildcards", () => {
+    describe("matching against an existing path with wildcards", () => {
       const syncPath = [3, 1, 2, 3];
 
       const asyncPathGenerator = async function* () {
@@ -3145,27 +3145,27 @@ if (import.meta.vitest) {
 
       const values = [v1];
 
-      it("search(syncPath)", async () => {
+      it("match(syncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(syncPath)) {
+        for await (const result of trie.match(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("search(asyncPath)", async () => {
+      it("match(asyncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(asyncPathGenerator())) {
+        for await (const result of trie.match(asyncPathGenerator())) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("searchSync(syncPath)", () => {
+      it("matchSync(syncPath)", () => {
         let count = 0;
-        for (const result of trie.searchSync(syncPath)) {
+        for (const result of trie.matchSync(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
@@ -3173,7 +3173,7 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("searching against multiple existing paths with wildcards 1", () => {
+    describe("matching against multiple existing paths with wildcards 1", () => {
       const syncPath = [1, 2, 3, 4, 5, 6, 2];
 
       const asyncPathGenerator = async function* () {
@@ -3188,27 +3188,27 @@ if (import.meta.vitest) {
 
       const values = [v2, v1];
 
-      it("search(syncPath)", async () => {
+      it("match(syncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(syncPath)) {
+        for await (const result of trie.match(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("search(asyncPath)", async () => {
+      it("match(asyncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(asyncPathGenerator())) {
+        for await (const result of trie.match(asyncPathGenerator())) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("searchSync(syncPath)", () => {
+      it("matchSync(syncPath)", () => {
         let count = 0;
-        for (const result of trie.searchSync(syncPath)) {
+        for (const result of trie.matchSync(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
@@ -3216,7 +3216,7 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("searching against multiple existing paths with wildcards 2", () => {
+    describe("matching against multiple existing paths with wildcards 2", () => {
       const syncPath = [1, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0];
 
       const asyncPathGenerator = async function* () {
@@ -3235,9 +3235,9 @@ if (import.meta.vitest) {
 
       const values = [v3, v2, v1];
 
-      it("search(syncPath)", async () => {
+      it("match(syncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(syncPath)) {
+        for await (const result of trie.match(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
@@ -3245,10 +3245,10 @@ if (import.meta.vitest) {
       });
 
       it(
-        "search(asyncPath)",
+        "match(asyncPath)",
         async () => {
           let count = 0;
-          for await (const result of trie.search(asyncPathGenerator())) {
+          for await (const result of trie.match(asyncPathGenerator())) {
             expect(result).toBe(values[count]);
             count++;
           }
@@ -3257,9 +3257,9 @@ if (import.meta.vitest) {
         { timeout: 100000 },
       );
 
-      it("searchSync(syncPath)", () => {
+      it("matchSync(syncPath)", () => {
         let count = 0;
-        for (const result of trie.searchSync(syncPath)) {
+        for (const result of trie.matchSync(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
@@ -3267,7 +3267,7 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("searching against multiple existing paths with wildcards 3", () => {
+    describe("matching against multiple existing paths with wildcards 3", () => {
       const syncPath = [4, 0];
 
       const asyncPathGenerator = async function* () {
@@ -3277,27 +3277,27 @@ if (import.meta.vitest) {
 
       const values = [v2, v3];
 
-      it("search(syncPath)", async () => {
+      it("match(syncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(syncPath)) {
+        for await (const result of trie.match(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("search(asyncPath)", async () => {
+      it("match(asyncPath)", async () => {
         let count = 0;
-        for await (const result of trie.search(asyncPathGenerator())) {
+        for await (const result of trie.match(asyncPathGenerator())) {
           expect(result).toBe(values[count]);
           count++;
         }
         expect(count).toBe(values.length);
       });
 
-      it("searchSync(syncPath)", () => {
+      it("matchSync(syncPath)", () => {
         let count = 0;
-        for (const result of trie.searchSync(syncPath)) {
+        for (const result of trie.matchSync(syncPath)) {
           expect(result).toBe(values[count]);
           count++;
         }
@@ -3305,7 +3305,7 @@ if (import.meta.vitest) {
       });
     });
 
-    describe("searching against a non-existing path (partial match)", () => {
+    describe("matching against a non-existing path (partial match)", () => {
       const syncPath = [1, 0, 0, 0, 0, 0];
 
       const asyncPathGenerator = async function* () {
@@ -3317,22 +3317,22 @@ if (import.meta.vitest) {
         yield 0;
       };
 
-      it("search(syncPath)", async () => {
-        for await (const _ of trie.search(syncPath)) {
+      it("match(syncPath)", async () => {
+        for await (const _ of trie.match(syncPath)) {
           _;
           expect.unreachable("should be unreachable");
         }
       });
 
-      it("search(asyncPath)", async () => {
-        for await (const _ of trie.search(asyncPathGenerator())) {
+      it("match(asyncPath)", async () => {
+        for await (const _ of trie.match(asyncPathGenerator())) {
           _;
           expect.unreachable("should be unreachable");
         }
       });
 
-      it("searchSync(syncPath)", () => {
-        for (const _ of trie.searchSync(syncPath)) {
+      it("matchSync(syncPath)", () => {
+        for (const _ of trie.matchSync(syncPath)) {
           _;
           expect.unreachable("should be unreachable");
         }
@@ -3408,85 +3408,85 @@ if (import.meta.vitest) {
         yield 0;
       };
 
-      it("search(syncPath)", async () => {
-        for await (const _ of trie.search(syncPath1)) {
+      it("match(syncPath)", async () => {
+        for await (const _ of trie.match(syncPath1)) {
           _;
         }
-        for await (const _ of trie.search(syncPath2)) {
+        for await (const _ of trie.match(syncPath2)) {
           _;
         }
-        for await (const _ of trie.search(syncPath3)) {
+        for await (const _ of trie.match(syncPath3)) {
           _;
         }
-        for await (const _ of trie.search(syncPath4)) {
+        for await (const _ of trie.match(syncPath4)) {
           _;
         }
-        for await (const _ of trie.search(syncPath5)) {
+        for await (const _ of trie.match(syncPath5)) {
           _;
         }
-        for await (const _ of trie.search(syncPath6)) {
+        for await (const _ of trie.match(syncPath6)) {
           _;
         }
-        for await (const _ of trie.search(syncPath7)) {
+        for await (const _ of trie.match(syncPath7)) {
           _;
         }
-        for await (const _ of trie.search(syncPath8)) {
-          _;
-        }
-        expect(trie.root).toStrictEqual(root1);
-      });
-
-      it("search(asyncPath)", async () => {
-        for await (const _ of trie.search(asyncPathGenerator1())) {
-          _;
-        }
-        for await (const _ of trie.search(asyncPathGenerator2())) {
-          _;
-        }
-        for await (const _ of trie.search(asyncPathGenerator3())) {
-          _;
-        }
-        for await (const _ of trie.search(asyncPathGenerator4())) {
-          _;
-        }
-        for await (const _ of trie.search(asyncPathGenerator5())) {
-          _;
-        }
-        for await (const _ of trie.search(asyncPathGenerator6())) {
-          _;
-        }
-        for await (const _ of trie.search(asyncPathGenerator7())) {
-          _;
-        }
-        for await (const _ of trie.search(asyncPathGenerator8())) {
+        for await (const _ of trie.match(syncPath8)) {
           _;
         }
         expect(trie.root).toStrictEqual(root1);
       });
 
-      it("searchSync(syncPath)", () => {
-        for (const _ of trie.searchSync(syncPath1)) {
+      it("match(asyncPath)", async () => {
+        for await (const _ of trie.match(asyncPathGenerator1())) {
           _;
         }
-        for (const _ of trie.searchSync(syncPath2)) {
+        for await (const _ of trie.match(asyncPathGenerator2())) {
           _;
         }
-        for (const _ of trie.searchSync(syncPath3)) {
+        for await (const _ of trie.match(asyncPathGenerator3())) {
           _;
         }
-        for (const _ of trie.searchSync(syncPath4)) {
+        for await (const _ of trie.match(asyncPathGenerator4())) {
           _;
         }
-        for (const _ of trie.searchSync(syncPath5)) {
+        for await (const _ of trie.match(asyncPathGenerator5())) {
           _;
         }
-        for (const _ of trie.searchSync(syncPath6)) {
+        for await (const _ of trie.match(asyncPathGenerator6())) {
           _;
         }
-        for (const _ of trie.searchSync(syncPath7)) {
+        for await (const _ of trie.match(asyncPathGenerator7())) {
           _;
         }
-        for (const _ of trie.searchSync(syncPath8)) {
+        for await (const _ of trie.match(asyncPathGenerator8())) {
+          _;
+        }
+        expect(trie.root).toStrictEqual(root1);
+      });
+
+      it("matchSync(syncPath)", () => {
+        for (const _ of trie.matchSync(syncPath1)) {
+          _;
+        }
+        for (const _ of trie.matchSync(syncPath2)) {
+          _;
+        }
+        for (const _ of trie.matchSync(syncPath3)) {
+          _;
+        }
+        for (const _ of trie.matchSync(syncPath4)) {
+          _;
+        }
+        for (const _ of trie.matchSync(syncPath5)) {
+          _;
+        }
+        for (const _ of trie.matchSync(syncPath6)) {
+          _;
+        }
+        for (const _ of trie.matchSync(syncPath7)) {
+          _;
+        }
+        for (const _ of trie.matchSync(syncPath8)) {
           _;
         }
         expect(trie.root).toStrictEqual(root1);
