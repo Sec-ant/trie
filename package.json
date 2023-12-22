@@ -1,0 +1,73 @@
+{
+  "name": "@sec-ant/trie",
+  "description": "A simple Trie structure with wildcard support to match streams",
+  "private": false,
+  "version": "0.1.0",
+  "type": "module",
+  "files": [
+    "./dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sec-ant/trie.git"
+  },
+  "homepage": "https://github.com/Sec-ant/trie",
+  "bugs": {
+    "url": "https://github.com/Sec-ant/trie/issues",
+    "email": "zzwu@zju.edu.cn"
+  },
+  "keywords": [
+    "trie",
+    "stream",
+    "wildcard"
+  ],
+  "author": {
+    "name": "Ze-Zheng Wu"
+  },
+  "license": "MIT",
+  "config": {},
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "vite",
+    "lint": "eslint . --ext .ts",
+    "type-check": "tsc --noEmit --emitDeclarationOnly false",
+    "format": "prettier . --write",
+    "prebuild": "npm run lint && npm run type-check && npm run format",
+    "build": "vite build",
+    "postbuild": "tsc",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build",
+    "ncu": "npx npm-check-updates --filterVersion \"/^[~^]/\" -u",
+    "postncu": "npm i"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vitest/coverage-istanbul": "^1.1.0",
+    "@vitest/ui": "^1.1.0",
+    "esbuild": "^0.19.10",
+    "eslint": "^8.56.0",
+    "just-clone": "^6.2.0",
+    "npm-check-updates": "^16.14.12",
+    "prettier": "^3.1.1",
+    "prettier-plugin-organize-imports": "^3.2.4",
+    "pretty-format": "^29.7.0",
+    "typescript": "^5.3.3",
+    "unplugin-preprocessor-directives": "^0.0.8",
+    "vite": "^5.0.10",
+    "vitest": "^1.1.0"
+  }
+}
