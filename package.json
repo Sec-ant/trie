@@ -33,7 +33,6 @@
   "license": "MIT",
   "config": {},
   "publishConfig": {
-    "provenance": true,
     "access": "public"
   },
   "scripts": {
