@@ -1,6 +1,6 @@
 {
   "name": "@sec-ant/trie",
-  "description": "A Trie structure that supports wildcards",
+  "description": "A simple Trie structure with wildcard support to match streams",
   "private": false,
   "version": "0.1.0",
   "type": "module",
@@ -23,7 +23,9 @@
     "email": "zzwu@zju.edu.cn"
   },
   "keywords": [
-    "trie"
+    "trie",
+    "stream",
+    "wildcard"
   ],
   "author": {
     "name": "Ze-Zheng Wu"
@@ -52,21 +54,17 @@
   "devDependencies": {
     "@commitlint/cli": "^18.4.3",
     "@commitlint/config-conventional": "^18.4.3",
-    "@semantic-release/git": "^10.0.1",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
-    "@vitest/browser": "^1.1.0",
     "@vitest/coverage-istanbul": "^1.1.0",
     "@vitest/ui": "^1.1.0",
     "esbuild": "^0.19.10",
     "eslint": "^8.56.0",
     "just-clone": "^6.2.0",
     "npm-check-updates": "^16.14.12",
-    "playwright": "^1.40.1",
     "prettier": "^3.1.1",
     "prettier-plugin-organize-imports": "^3.2.4",
     "pretty-format": "^29.7.0",
-    "semantic-release": "^22.0.12",
     "typescript": "^5.3.3",
     "unplugin-preprocessor-directives": "^0.0.8",
     "vite": "^5.0.10",
