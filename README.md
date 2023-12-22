@@ -16,43 +16,43 @@ const trie = new Trie([
 ]);
 ```
 
-yields to
+Internal structure of the above code:
 
 ```
 Map {
   1 => Map {
     2 => Map {
-      :d => "v1",
+      [sym:d] => "v1",
     },
-    :* => Map {
-      :c => 5,
+    [sym:*] => Map {
+      [sym:c] => 5,
       2 => Map {
-        :d => "v3",
+        [sym:d] => "v3",
       },
-      :* => Map {
-        :c => 5,
-        :d => "v4",
+      [sym:*] => Map {
+        [sym:c] => 5,
+        [sym:d] => "v4",
       },
     },
   },
   2 => Map {
     2 => Map {
-      :d => "v2",
+      [sym:d] => "v2",
     },
   },
   3 => Map {
-    :* => Map {
-      :c => 3,
-      :d => "v5",
+    [sym:*] => Map {
+      [sym:c] => 3,
+      [sym:d] => "v5",
     },
   },
   4 => Map {
-    :* => Map {
-      :c => 1,
-      :d => "v6",
+    [sym:*] => Map {
+      [sym:c] => 1,
+      [sym:d] => "v6",
     },
     0 => Map {
-      :d => "v7",
+      [sym:d] => "v7",
     },
   },
 }
