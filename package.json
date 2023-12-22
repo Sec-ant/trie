@@ -45,8 +45,9 @@
     "postbuild": "tsc",
     "test": "vitest",
     "test:ui": "vitest --ui",
+    "test:ci": "vitest run",
     "preview": "vite preview",
-    "prepublishOnly": "npm run build && npm run test",
+    "prepublishOnly": "npm run build && npm run test:ci",
     "ncu": "npx npm-check-updates --filterVersion \"/^[~^]/\" -u",
     "postncu": "npm i"
   },
