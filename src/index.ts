@@ -91,7 +91,7 @@ export type WildcardSegment = WeakMap<typeof wildcardSymbol, number>;
 /**
  * Creates a wildcard path segment with an optional count.
  * @param count - Optional count for the wildcard. Default is 1.
- * @returns A  wildcard path segment.
+ * @returns A wildcard path segment.
  */
 export function w(count = 1): WildcardSegment {
   if (Number.isSafeInteger(count) && count > 0) {
