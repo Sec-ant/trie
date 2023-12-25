@@ -146,22 +146,36 @@ export declare function r(): ResetSegment;
 
 #### Methods
 
-The `Trie` class provides the following methods:
+The `Trie<I, V>` class provides the following methods:
 
-- `constructor(initialEntries?: Iterable<[Iterable<I | WildcardSegment>, V]>)`: Constructs a new Trie. Optionally populates the Trie with initial entries.
-- `add(initialEntries: AnyIterable<[AnyIterable<I | WildcardSegment>, V]>)`: Asynchronously adds paths to the Trie with the specified values.
-- `addSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]>)`: Synchronously adds paths to the Trie with the specified values.
-- `set(path: AnyIterable<I | WildcardSegment>, value: V)`: Asynchronously sets the value for a path in the Trie.
-- `setSync(path: Iterable<I | WildcardSegment>, value: V)`: Synchronously sets the value for a path in the Trie.
-- `has(path: AnyIterable<I | WildcardSegment>)`: Asynchronously checks if a path exists in the Trie.
-- `hasSync(path: Iterable<I | WildcardSegment>)`: Synchronously checks if a path exists in the Trie.
-- `get(path: AnyIterable<I | WildcardSegment>)`: Asynchronously retrieves the value associated with a path in the Trie.
-- `getSync(path: Iterable<I | WildcardSegment>)`: Synchronously retrieves the value associated with a path in the Trie.
-- `delete(path: AnyIterable<I | WildcardSegment>)`: Asynchronously deletes a path from the Trie.
-- `deleteSync(path: Iterable<I | WildcardSegment>)`: Synchronously deletes a path from the Trie.
+- `constructor(initialEntries?: Iterable<[Iterable<Segment<I>>, V]>)`: Constructs a new Trie. Optionally populates the Trie with initial entries.
+- `add(initialEntries: AnyIterable<[AnyIterable<Segment<I>>, V]>)`: Asynchronously adds paths to the Trie with the specified values.
+- `addSync(initialEntries: Iterable<[Iterable<Segment<I>>, V]>)`: Synchronously adds paths to the Trie with the specified values.
+- `set(path: AnyIterable<Segment<I>>, value: V)`: Asynchronously sets the value for a path in the Trie.
+- `setSync(path: Iterable<Segment<I>>, value: V)`: Synchronously sets the value for a path in the Trie.
+- `has(path: AnyIterable<Segment<I>>)`: Asynchronously checks if a path exists in the Trie.
+- `hasSync(path: Iterable<Segment<I>>)`: Synchronously checks if a path exists in the Trie.
+- `get(path: AnyIterable<Segment<I>>)`: Asynchronously retrieves the value associated with a path in the Trie.
+- `getSync(path: Iterable<Segment<I>>)`: Synchronously retrieves the value associated with a path in the Trie.
+- `delete(path: AnyIterable<Segment<I>>)`: Asynchronously deletes a path from the Trie.
+- `deleteSync(path: Iterable<Segment<I>>)`: Synchronously deletes a path from the Trie.
 - `clear()`: Clears all paths from the Trie.
 - `match(path: AnyIterable<I>)`: Asynchronously searches for values matching a given path. Returns an asynchronous generator.
 - `matchSync(path: Iterable<I>)`: Synchronously searches for values matching a given path. Returns a generator.
+
+where:
+
+```ts
+/**
+ * Represents either an Iterable or an AsyncIterable of type T.
+ */
+type AnyIterable<T> = Iterable<T> | AsyncIterable<T>;
+
+/**
+ * Represents a path segment.
+ */
+export type Segment<I> = I | WildcardSegment | ResetSegment;
+```
 
 #### Properties
 
