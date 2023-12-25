@@ -91,7 +91,7 @@ interface SeekContext<I, V> {
 /**
  * Represents a wildcard path segment.
  */
-export type WildcardSegment = WeakMap<typeof wildcardSymbol, number>;
+export type WildcardSegment = WeakMap<WildcardSymbol, number>;
 
 /**
  * Creates a wildcard path segment with an optional count.
