@@ -295,7 +295,7 @@ export class Trie<I, V> {
       Symbol.asyncIterator in path
         ? path[Symbol.asyncIterator]()
         : path[Symbol.iterator]();
-    yield* branchOut(this.#root, pathIterator);
+    yield* traverse(this.#root, pathIterator);
   }
   /**
    * Synchronously searches for values matching a given path.
@@ -304,7 +304,7 @@ export class Trie<I, V> {
    */
   *matchSync(path: Iterable<I>) {
     const pathIterator = path[Symbol.iterator]();
-    yield* branchOutSync(this.#root, pathIterator);
+    yield* traverseSync(this.#root, pathIterator);
   }
   // #if DEV
   /**
@@ -770,14 +770,14 @@ function cleanUp<I, V>(node: Node<I, V>, stack: Stack<I, V>) {
 }
 
 /**
- * Asynchronously generates values by branching out from a Trie node based on a path iterator.
+ * Asynchronously generates values by traversing from a Trie node based on a path iterator.
  * @template I - Type of keys in the Trie.
  * @template V - Type of values stored in the Trie.
  * @param node - The Trie node to start branching from.
  * @param pathIterator - An asynchronous iterator representing the path to follow.
  * @returns An asynchronous generator yielding values based on the path.
  */
-async function* branchOut<I, V>(
+async function* traverse<I, V>(
   node: Node<I, V>,
   pathIterator: AsyncIterator<I> | Iterator<I>,
 ): AsyncGenerator<V | undefined, void, unknown> {
@@ -803,17 +803,17 @@ async function* branchOut<I, V>(
   const nextRegularNode = node.get(value);
   // wildcard match only
   if (nextWildcardNode && !nextRegularNode) {
-    yield* branchOut<I, V>(nextWildcardNode, pathIterator);
+    yield* traverse<I, V>(nextWildcardNode, pathIterator);
   }
   // regular match only
   else if (!nextWildcardNode && nextRegularNode) {
-    yield* branchOut<I, V>(nextRegularNode, pathIterator);
+    yield* traverse<I, V>(nextRegularNode, pathIterator);
   }
   // both, we need to tee the path iterator
   else if (nextWildcardNode && nextRegularNode) {
     const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
-    yield* branchOut<I, V>(nextWildcardNode, pathIterator1);
-    yield* branchOut<I, V>(nextRegularNode, pathIterator2);
+    yield* traverse<I, V>(nextWildcardNode, pathIterator1);
+    yield* traverse<I, V>(nextRegularNode, pathIterator2);
   }
   // none
   else {
@@ -822,14 +822,14 @@ async function* branchOut<I, V>(
 }
 
 /**
- * Synchronously generates values by branching out from a Trie node based on a path iterator.
+ * Synchronously generates values by traversing from a Trie node based on a path iterator.
  * @template I - Type of keys in the Trie.
  * @template V - Type of values stored in the Trie.
  * @param node - The Trie node to start branching from.
  * @param pathIterator - A synchronous iterator representing the path to follow.
  * @returns A generator yielding values based on the path.
  */
-function* branchOutSync<I, V>(
+function* traverseSync<I, V>(
   node: Node<I, V>,
   pathIterator: Iterator<I>,
 ): Generator<V | undefined, void, unknown> {
@@ -855,17 +855,17 @@ function* branchOutSync<I, V>(
   const childNode2 = node.get(value);
   // wildcard match only
   if (childNode1 && !childNode2) {
-    yield* branchOutSync<I, V>(childNode1, pathIterator);
+    yield* traverseSync<I, V>(childNode1, pathIterator);
   }
   // regular match only
   else if (!childNode1 && childNode2) {
-    yield* branchOutSync<I, V>(childNode2, pathIterator);
+    yield* traverseSync<I, V>(childNode2, pathIterator);
   }
   // both, we need to tee the path iterator
   else if (childNode1 && childNode2) {
     const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
-    yield* branchOutSync<I, V>(childNode1, pathIterator1);
-    yield* branchOutSync<I, V>(childNode2, pathIterator2);
+    yield* traverseSync<I, V>(childNode1, pathIterator1);
+    yield* traverseSync<I, V>(childNode2, pathIterator2);
   }
   // none
   else {
