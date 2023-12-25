@@ -108,6 +108,11 @@ export function w(count = 1): WildcardSegment {
 }
 
 /**
+ * Represents a path segment.
+ */
+export type Segment<I> = I | WildcardSegment;
+
+/**
  * Represents a Trie data structure.
  * @template I - Type of keys in the Trie.
  * @template V - Type of values stored in the Trie.
@@ -119,9 +124,9 @@ export class Trie<I, V> {
    * Constructs a new Trie.
    * @param initialEntries - Optional initial entries to populate the Trie.
    */
-  constructor(
-    initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]> = [],
-  ) {
+  constructor(initialEntries: Iterable<[Iterable<Segment<I>>, V]> = []) {
+    this.match = this.match.bind(this);
+    this.matchSync = this.matchSync.bind(this);
     return this.addSync(initialEntries);
   }
   /**
@@ -129,32 +134,30 @@ export class Trie<I, V> {
    * @param initialEntries - The optional initial entries to add to the Trie.
    * @returns A Promise that resolves to the Trie instance.
    */
-  async add(
-    initialEntries: AnyIterable<[AnyIterable<I | WildcardSegment>, V]>,
-  ) {
+  add = async (initialEntries: AnyIterable<[AnyIterable<Segment<I>>, V]>) => {
     for await (const [key, value] of initialEntries) {
       await this.set(key, value);
     }
     return this;
-  }
+  };
   /**
    * Synchronously adds paths to the Trie with the specified values.
    * @param initialEntries - The optional initial entries to add to the Trie.
    * @returns The Trie instance.
    */
-  addSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]>) {
+  addSync = (initialEntries: Iterable<[Iterable<Segment<I>>, V]>) => {
     for (const [key, value] of initialEntries) {
       this.setSync(key, value);
     }
     return this;
-  }
+  };
   /**
    * Asynchronously sets the value for a path in the Trie.
    * @param path - The path to set.
    * @param value - The value to associate with the path.
    * @returns A Promise that resolves to the Trie instance.
    */
-  async set(path: AnyIterable<I | WildcardSegment>, value: V) {
+  set = async (path: AnyIterable<Segment<I>>, value: V) => {
     const node = await hardSeek(this.#root, path);
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, value);
@@ -162,14 +165,14 @@ export class Trie<I, V> {
       ++this.#size;
     }
     return this;
-  }
+  };
   /**
    * Synchronously sets the value for a path in the Trie.
    * @param path - The path to set.
    * @param value - The value to associate with the path.
    * @returns The Trie instance.
    */
-  setSync(path: Iterable<I | WildcardSegment>, value: V) {
+  setSync = (path: Iterable<Segment<I>>, value: V) => {
     const node = hardSeekSync(this.#root, path);
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, value);
@@ -177,17 +180,17 @@ export class Trie<I, V> {
       ++this.#size;
     }
     return this;
-  }
+  };
   /**
    * Asynchronously sets the value for a path in the Trie using a callback.
    * @param path - The path to set.
    * @param callback - The callback function to determine the new value.
    * @returns A Promise that resolves to the Trie instance.
    */
-  async setCallback(
-    path: AnyIterable<I | WildcardSegment>,
+  setCallback = async (
+    path: AnyIterable<Segment<I>>,
     callback: (prev: V | undefined, exists: boolean) => V | Promise<V>,
-  ) {
+  ) => {
     const node = await hardSeek(this.#root, path);
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, await callback(node.get(dataSymbol), exists));
@@ -195,17 +198,17 @@ export class Trie<I, V> {
       ++this.#size;
     }
     return this;
-  }
+  };
   /**
    * Synchronously sets the value for a path in the Trie using a callback.
    * @param path - The path to set.
    * @param callback - The callback function to determine the new value.
    * @returns The Trie instance.
    */
-  setCallbackSync(
-    path: Iterable<I | WildcardSegment>,
+  setCallbackSync = (
+    path: Iterable<Segment<I>>,
     callback: (prev: V | undefined, exists: boolean) => V,
-  ) {
+  ) => {
     const node = hardSeekSync(this.#root, path);
     const exists = node.has(dataSymbol);
     node.set(dataSymbol, callback(node.get(dataSymbol), exists));
@@ -213,45 +216,45 @@ export class Trie<I, V> {
       ++this.#size;
     }
     return this;
-  }
+  };
   /**
    * Asynchronously checks if a path exists in the Trie.
    * @param path - The path to check.
    * @returns A Promise that resolves to true if the path exists, false otherwise.
    */
-  async has(path: AnyIterable<I | WildcardSegment>) {
+  has = async (path: AnyIterable<Segment<I>>) => {
     return !!(await softSeek(this.#root, path));
-  }
+  };
   /**
    * Synchronously checks if a path exists in the Trie.
    * @param path - The path to check.
    * @returns True if the path exists, false otherwise.
    */
-  hasSync(path: Iterable<I | WildcardSegment>) {
+  hasSync = (path: Iterable<Segment<I>>) => {
     return !!softSeekSync(this.#root, path);
-  }
+  };
   /**
    * Asynchronously retrieves the value associated with a path in the Trie.
    * @param path - The path to retrieve the value for.
    * @returns A Promise that resolves to the value associated with the path, or undefined if not found.
    */
-  async get(path: AnyIterable<I | WildcardSegment>) {
+  get = async (path: AnyIterable<Segment<I>>) => {
     return (await softSeek(this.#root, path))?.get(dataSymbol);
-  }
+  };
   /**
    * Synchronously retrieves the value associated with a path in the Trie.
    * @param path - The path to retrieve the value for.
    * @returns The value associated with the path, or undefined if not found.
    */
-  getSync(path: Iterable<I | WildcardSegment>) {
+  getSync = (path: Iterable<Segment<I>>) => {
     return softSeekSync(this.#root, path)?.get(dataSymbol);
-  }
+  };
   /**
    * Asynchronously deletes a path from the Trie.
    * @param path - The path to delete.
    * @returns A Promise that resolves to true if the path was deleted, false otherwise.
    */
-  async delete(path: AnyIterable<I | WildcardSegment>) {
+  delete = async (path: AnyIterable<Segment<I>>) => {
     const stack: Stack<I, V> = [];
     const node = await softSeek(this.#root, path, stack);
     if (!node) {
@@ -261,13 +264,13 @@ export class Trie<I, V> {
     cleanUp(node, stack);
     --this.#size;
     return true;
-  }
+  };
   /**
    * Synchronously deletes a path from the Trie.
    * @param path - The path to delete.
    * @returns True if the path was deleted, false otherwise.
    */
-  deleteSync(path: Iterable<I | WildcardSegment>) {
+  deleteSync = (path: Iterable<Segment<I>>) => {
     const stack: Stack<I, V> = [];
     const node = softSeekSync(this.#root, path, stack);
     if (!node) {
@@ -277,14 +280,14 @@ export class Trie<I, V> {
     cleanUp(node, stack);
     --this.#size;
     return true;
-  }
+  };
   /**
    * Clears all paths from the Trie.
    */
-  clear() {
+  clear = () => {
     this.#root.clear();
     this.#size = 0;
-  }
+  };
   /**
    * Asynchronously searches for values matching a given path.
    * @param path - The path to match against.
@@ -573,10 +576,7 @@ function hardSeekStep<I, V>(
  * @param path - The path to seek in the Trie.
  * @returns The Trie node at the end of the seek operation.
  */
-async function hardSeek<I, V>(
-  root: Node<I, V>,
-  path: AnyIterable<I | WildcardSegment>,
-) {
+async function hardSeek<I, V>(root: Node<I, V>, path: AnyIterable<Segment<I>>) {
   let node = root;
   const seekContext: SeekContext<I, V> = {
     nodeWildcardCount: 0,
@@ -596,10 +596,7 @@ async function hardSeek<I, V>(
  * @param path - The path to seek in the Trie.
  * @returns The Trie node at the end of the seek operation.
  */
-function hardSeekSync<I, V>(
-  root: Node<I, V>,
-  path: Iterable<I | WildcardSegment>,
-) {
+function hardSeekSync<I, V>(root: Node<I, V>, path: Iterable<Segment<I>>) {
   let node = root;
   const seekContext: SeekContext<I, V> = {
     nodeWildcardCount: 0,
@@ -664,7 +661,7 @@ function softSeekStep<I, V>(
  */
 async function softSeek<I, V>(
   root: Node<I, V>,
-  path: AnyIterable<I | WildcardSegment>,
+  path: AnyIterable<Segment<I>>,
   stack?: Stack<I, V>,
 ) {
   let node = root;
@@ -700,7 +697,7 @@ async function softSeek<I, V>(
  */
 function softSeekSync<I, V>(
   root: Node<I, V>,
-  path: Iterable<I | WildcardSegment>,
+  path: Iterable<Segment<I>>,
   stack?: Stack<I, V>,
 ) {
   let node = root;
