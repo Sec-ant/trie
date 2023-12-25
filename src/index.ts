@@ -327,7 +327,7 @@ export class Trie<I, V> {
       Symbol.asyncIterator in path
         ? path[Symbol.asyncIterator]()
         : path[Symbol.iterator]();
-    yield* traverse(this.#root, pathIterator);
+    yield* traverse(this.#root, pathIterator, this.#root);
   }
   /**
    * Synchronously searches for values matching a given path.
@@ -336,7 +336,7 @@ export class Trie<I, V> {
    */
   *matchSync(path: Iterable<I>) {
     const pathIterator = path[Symbol.iterator]();
-    yield* traverseSync(this.#root, pathIterator);
+    yield* traverseSync(this.#root, pathIterator, this.#root);
   }
   // #if DEV
   /**
@@ -837,6 +837,7 @@ function cleanUp<I, V>(node: Node<I, V>, stack: Stack<I, V>) {
 async function* traverse<I, V>(
   node: Node<I, V>,
   pathIterator: AsyncIterator<I> | Iterator<I>,
+  root: Node<I, V>,
 ): AsyncGenerator<V | undefined, void, unknown> {
   // wildcard
   if (isWildcardCountNode(node)) {
@@ -851,6 +852,12 @@ async function* traverse<I, V>(
   if (node.has(dataSymbol)) {
     yield node.get(dataSymbol);
   }
+  // reset trie
+  if (node.has(resetSymbol)) {
+    const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
+    yield* traverse<I, V>(root, pathIterator1, root);
+    pathIterator = pathIterator2;
+  }
   const { value, done } = await pathIterator.next();
   if (done) {
     return;
@@ -860,17 +867,17 @@ async function* traverse<I, V>(
   const nextRegularNode = node.get(value);
   // wildcard match only
   if (nextWildcardNode && !nextRegularNode) {
-    yield* traverse<I, V>(nextWildcardNode, pathIterator);
+    yield* traverse<I, V>(nextWildcardNode, pathIterator, root);
   }
   // regular match only
   else if (!nextWildcardNode && nextRegularNode) {
-    yield* traverse<I, V>(nextRegularNode, pathIterator);
+    yield* traverse<I, V>(nextRegularNode, pathIterator, root);
   }
   // both, we need to tee the path iterator
   else if (nextWildcardNode && nextRegularNode) {
     const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
-    yield* traverse<I, V>(nextWildcardNode, pathIterator1);
-    yield* traverse<I, V>(nextRegularNode, pathIterator2);
+    yield* traverse<I, V>(nextWildcardNode, pathIterator1, root);
+    yield* traverse<I, V>(nextRegularNode, pathIterator2, root);
   }
   // none
   else {
@@ -889,6 +896,7 @@ async function* traverse<I, V>(
 function* traverseSync<I, V>(
   node: Node<I, V>,
   pathIterator: Iterator<I>,
+  root: Node<I, V>,
 ): Generator<V | undefined, void, unknown> {
   // wildcard
   if (isWildcardCountNode(node)) {
@@ -903,6 +911,12 @@ function* traverseSync<I, V>(
   if (node.has(dataSymbol)) {
     yield node.get(dataSymbol);
   }
+  // reset trie
+  if (node.has(resetSymbol)) {
+    const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
+    yield* traverseSync<I, V>(root, pathIterator1, root);
+    pathIterator = pathIterator2;
+  }
   const { value, done } = pathIterator.next();
   if (done) {
     return;
@@ -912,17 +926,17 @@ function* traverseSync<I, V>(
   const childNode2 = node.get(value);
   // wildcard match only
   if (childNode1 && !childNode2) {
-    yield* traverseSync<I, V>(childNode1, pathIterator);
+    yield* traverseSync<I, V>(childNode1, pathIterator, root);
   }
   // regular match only
   else if (!childNode1 && childNode2) {
-    yield* traverseSync<I, V>(childNode2, pathIterator);
+    yield* traverseSync<I, V>(childNode2, pathIterator, root);
   }
   // both, we need to tee the path iterator
   else if (childNode1 && childNode2) {
     const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
-    yield* traverseSync<I, V>(childNode1, pathIterator1);
-    yield* traverseSync<I, V>(childNode2, pathIterator2);
+    yield* traverseSync<I, V>(childNode1, pathIterator1, root);
+    yield* traverseSync<I, V>(childNode2, pathIterator2, root);
   }
   // none
   else {
