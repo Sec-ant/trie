@@ -130,6 +130,18 @@ This is a function to create wildcard segments that can be used in a path when c
 export declare function w(count?: number): WildcardSegment;
 ```
 
+### `r`
+
+This is a function to create reset segments that can be used in a path when constructing the Trie:
+
+```ts
+/**
+ * Creates a reset path segment.
+ * @returns A reset path segment.
+ */
+export declare function r(): ResetSegment;
+```
+
 ### `Trie`
 
 #### Methods
