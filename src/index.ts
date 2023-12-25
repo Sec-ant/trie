@@ -15,6 +15,10 @@ const wildcardSymbol = Symbol("*");
  * Symbol as the key of the count of wildcards in the a wildcard node.
  */
 const wildcardCountSymbol = Symbol("c");
+/**
+ * Symbol as the key of a reset node in the Trie.
+ */
+const resetSymbol = Symbol("r");
 
 /**
  * Type alias for the data symbol.
@@ -28,6 +32,10 @@ type WildcardSymbol = typeof wildcardSymbol;
  * Type alias for the wildcard count symbol.
  */
 type WildcardCountSymbol = typeof wildcardCountSymbol;
+/**
+ * Type alias for the reset symbol.
+ */
+type ResetSymbol = typeof resetSymbol;
 
 /**
  * Represents a node in the Trie with wildcard count.
@@ -41,6 +49,12 @@ type WildcardCountNode<I, V> = Map<WildcardCountSymbol, number> & Node<I, V>;
  * @template V - Type of values stored in the Trie.
  */
 type WildcardNode<I, V> = Map<WildcardSymbol, WildcardCountNode<I, V>>;
+/**
+ * Represents a reset node in the Trie.
+ * @template I - Type of keys in the node.
+ * @template V - Type of values stored in the Trie.
+ */
+type ResetNode<I, V> = Map<ResetSymbol, Node<I, V>>;
 /**
  * Represents a data node in the Trie.
  * @template V - Type of values stored in the Trie.
@@ -62,7 +76,9 @@ type RegularBranchNode<I, V> = Map<I, Node<I, V>>;
  * @template I - Type of keys in the node.
  * @template V - Type of values stored in the Trie.
  */
-type BranchNode<I, V> = WildcardNode<I, V> & RegularBranchNode<I, V>;
+type BranchNode<I, V> = WildcardNode<I, V> &
+  ResetNode<I, V> &
+  RegularBranchNode<I, V>;
 /**
  * Represents a node in the Trie.
  * @template I - Type of keys in the node.
@@ -75,7 +91,7 @@ type Node<I, V> = BranchNode<I, V> & LeafNode<V>;
  * @template I - Type of keys in the Trie.
  * @template V - Type of values stored in the Trie.
  */
-type Stack<I, V> = [I | WildcardSymbol, Node<I, V>][];
+type Stack<I, V> = [I | WildcardSymbol | ResetSymbol, Node<I, V>][];
 
 /**
  * Interface representing the context during Trie seek operations.
@@ -108,9 +124,22 @@ export function w(count = 1): WildcardSegment {
 }
 
 /**
+ * Represents a reset path segment.
+ */
+export type ResetSegment = WeakSet<ResetSymbol>;
+
+/**
+ * Creates a reset path segment.
+ * @returns A reset path segment.
+ */
+export function r(): ResetSegment {
+  return new WeakSet([resetSymbol]);
+}
+
+/**
  * Represents a path segment.
  */
-export type Segment<I> = I | WildcardSegment;
+export type Segment<I> = I | WildcardSegment | ResetSegment;
 
 /**
  * Represents a Trie data structure.
@@ -475,6 +504,15 @@ function isWildcardSegment(segment: unknown): segment is WildcardSegment {
 }
 
 /**
+ * Checks if the given segment is a reset path segment.
+ * @param segment - The segment to check.
+ * @returns True if the segment is a reset path segment, false otherwise.
+ */
+function isResetSegment(segment: unknown): segment is ResetSegment {
+  return segment instanceof WeakSet && segment.has(resetSymbol);
+}
+
+/**
  * Asserts that the given value has the specified type.
  * @template T - The expected type of the value.
  * @param _ - The value to assert.
@@ -543,29 +581,38 @@ function resolveNode<I, V>(node: Node<I, V>, seekContext: SeekContext<I, V>) {
  */
 function hardSeekStep<I, V>(
   node: Node<I, V>,
-  segment: I | WildcardSegment,
+  segment: Segment<I>,
   seekContext: SeekContext<I, V>,
 ) {
-  if (!isWildcardSegment(segment)) {
+  if (isWildcardSegment(segment)) {
+    seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
+    while (
+      node.has(wildcardSymbol) &&
+      seekContext.nodeWildcardCount < seekContext.pathWildcardCount
+    ) {
+      const childNode = node.get(wildcardSymbol)!;
+      seekContext.nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
+      seekContext.parentNode = node;
+      node = childNode;
+    }
+    return node;
+  }
+  if (isResetSegment(segment)) {
     node = resolveNode(node, seekContext);
-    let childNode = node.get(segment);
+    let childNode = node.get(resetSymbol);
     if (!childNode) {
       childNode = new Map();
-      node.set(segment, childNode);
+      node.set(resetSymbol, childNode);
     }
     return childNode;
   }
-  seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
-  while (
-    node.has(wildcardSymbol) &&
-    seekContext.nodeWildcardCount < seekContext.pathWildcardCount
-  ) {
-    const childNode = node.get(wildcardSymbol)!;
-    seekContext.nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
-    seekContext.parentNode = node;
-    node = childNode;
+  node = resolveNode(node, seekContext);
+  let childNode = node.get(segment);
+  if (!childNode) {
+    childNode = new Map();
+    node.set(segment, childNode);
   }
-  return node;
+  return childNode;
 }
 
 /**
@@ -620,34 +667,47 @@ function hardSeekSync<I, V>(root: Node<I, V>, path: Iterable<Segment<I>>) {
  */
 function softSeekStep<I, V>(
   node: Node<I, V>,
-  segment: I | WildcardSegment,
+  segment: Segment<I>,
   seekContext: SeekContext<I, V>,
   stack?: Stack<I, V>,
 ) {
-  if (!isWildcardSegment(segment)) {
+  if (isWildcardSegment(segment)) {
+    seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
+    while (
+      node.has(wildcardSymbol) &&
+      seekContext.nodeWildcardCount < seekContext.pathWildcardCount
+    ) {
+      const childNode = node.get(wildcardSymbol)!;
+      seekContext.nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
+      stack?.push([wildcardSymbol, node]);
+      node = childNode;
+    }
+    return node;
+  }
+  if (isResetSegment(segment)) {
     if (seekContext.nodeWildcardCount !== seekContext.pathWildcardCount) {
       stack?.splice(0, stack.length);
       return undefined;
     }
-    const childNode = node.get(segment);
+    const childNode = node.get(resetSymbol);
     if (!childNode) {
       stack?.splice(0, stack.length);
       return undefined;
     }
-    stack?.push([segment, node]);
+    stack?.push([resetSymbol, node]);
     return childNode;
   }
-  seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
-  while (
-    node.has(wildcardSymbol) &&
-    seekContext.nodeWildcardCount < seekContext.pathWildcardCount
-  ) {
-    const childNode = node.get(wildcardSymbol)!;
-    seekContext.nodeWildcardCount += childNode.get(wildcardCountSymbol) ?? 1;
-    stack?.push([wildcardSymbol, node]);
-    node = childNode;
+  if (seekContext.nodeWildcardCount !== seekContext.pathWildcardCount) {
+    stack?.splice(0, stack.length);
+    return undefined;
   }
-  return node;
+  const childNode = node.get(segment);
+  if (!childNode) {
+    stack?.splice(0, stack.length);
+    return undefined;
+  }
+  stack?.push([segment, node]);
+  return childNode;
 }
 
 /**
