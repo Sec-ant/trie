@@ -42,28 +42,33 @@ type WildcardCountNode<I, V> = Map<WildcardCountSymbol, number> & Node<I, V>;
  */
 type WildcardNode<I, V> = Map<WildcardSymbol, WildcardCountNode<I, V>>;
 /**
- * Represents a regular node in the Trie.
- * @template I - Type of keys in the node.
+ * Represents a data node in the Trie.
  * @template V - Type of values stored in the Trie.
  */
-type RegularNode<I, V> = Map<I, Node<I, V>>;
-/**
- * Represents a branch node in the Trie.
- * @template V - Type of values stored in the Trie.
- */
-type BranchNode<V> = Map<DataSymbol, V>;
+type DataNode<V> = Map<DataSymbol, V>;
 /**
  * Represents a leaf node in the Trie.
+ * @template V - Type of values stored in the Trie.
+ */
+type LeafNode<V> = DataNode<V>;
+/**
+ * Represents a regular branch node in the Trie.
  * @template I - Type of keys in the node.
  * @template V - Type of values stored in the Trie.
  */
-type LeafNode<I, V> = WildcardNode<I, V> & RegularNode<I, V>;
+type RegularBranchNode<I, V> = Map<I, Node<I, V>>;
+/**
+ * Represents a branch node in the Trie.
+ * @template I - Type of keys in the node.
+ * @template V - Type of values stored in the Trie.
+ */
+type BranchNode<I, V> = WildcardNode<I, V> & RegularBranchNode<I, V>;
 /**
  * Represents a node in the Trie.
  * @template I - Type of keys in the node.
  * @template V - Type of values stored in the Trie.
  */
-type Node<I, V> = LeafNode<I, V> & BranchNode<V>;
+type Node<I, V> = BranchNode<I, V> & LeafNode<V>;
 
 /**
  * Represents a stack used in Trie operations.
