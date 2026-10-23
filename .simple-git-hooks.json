@@ -1,0 +1,4 @@
+{
+  "pre-commit": "pnpm -s lint-staged",
+  "commit-msg": "pnpm exec commitlint --edit \"$1\""
+}

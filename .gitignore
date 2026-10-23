@@ -26,3 +26,7 @@ dist-ssr
 
 coverage
 *.tgz
+*.tsbuildinfo
+__screenshots__
+playwright-report
+test-results

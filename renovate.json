@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    "github>Sec-ant/renovate-config",
+    "github>Sec-ant/renovate-config:silent-automerge",
+    "helpers:pinGitHubActionDigestsToSemver",
+    "customManagers:biomeVersions",
+    ":preserveSemverRanges"
+  ],
+  "lockFileMaintenance": {
+    "enabled": false
+  }
+}

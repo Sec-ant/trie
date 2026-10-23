@@ -1,23 +1,12 @@
 {
   "typescript.tsdk": "node_modules/typescript/lib",
-  "better-comments.tags": [
-    {
-      "tag": "#if",
-      "color": "#F0DB4F",
-      "strikethrough": false,
-      "underline": true,
-      "backgroundColor": "transparent",
-      "bold": true,
-      "italic": false
-    },
-    {
-      "tag": "#endif",
-      "color": "#F0DB4F",
-      "strikethrough": false,
-      "underline": true,
-      "backgroundColor": "transparent",
-      "bold": true,
-      "italic": false
-    }
-  ]
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "editor.codeActionsOnSave": {
+    "source.organizeImports.biome": "explicit"
+  }
 }

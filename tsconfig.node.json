@@ -1,15 +1,10 @@
 {
-  "extends": ["./tsconfig.json"],
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "composite": true,
-    "types": ["node"],
-    "resolveJsonModule": true,
-    "allowJs": true
+    "types": ["node", "vitest/importMeta"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true
   },
-  "include": [
-    "./scripts",
-    "./vite.config.ts",
-    "./package.json",
-    "./package-lock.json"
-  ]
+  "include": ["scripts", "vite.config.ts", "vitest.browser.config.ts"]
 }

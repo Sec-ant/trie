@@ -1,3 +1,5 @@
+import clone from "just-clone";
+
 /**
  * Represents either an Iterable or an AsyncIterable of type T.
  */
@@ -88,10 +90,11 @@ interface SeekContext<I, V> {
   pathWildcardCount: number;
 }
 
-/**
- * Represents a wildcard path segment.
- */
-export type WildcardSegment = WeakMap<WildcardSymbol, number>;
+/** Private object keys keep wildcard markers compatible with ES2020 hosts. */
+const wildcardSegmentKey = {};
+
+/** Represents a wildcard path segment. Create markers with w(). */
+export type WildcardSegment = WeakMap<object, number>;
 
 /**
  * Creates a wildcard path segment with an optional count.
@@ -100,11 +103,10 @@ export type WildcardSegment = WeakMap<WildcardSymbol, number>;
  */
 export function w(count = 1): WildcardSegment {
   if (Number.isSafeInteger(count) && count > 0) {
-    return new WeakMap([[wildcardSymbol, count]]);
-  } else {
-    console.warn(`Invalid wildcard count: ${count}, fallback to 1.`);
-    return new WeakMap([[wildcardSymbol, 1]]);
+    return new WeakMap([[wildcardSegmentKey, count]]);
   }
+  console.warn(`Invalid wildcard count: ${count}, fallback to 1.`);
+  return new WeakMap([[wildcardSegmentKey, 1]]);
 }
 
 /**
@@ -127,7 +129,7 @@ export class Trie<I, V> {
   constructor(initialEntries: Iterable<[Iterable<Segment<I>>, V]> = []) {
     this.match = this.match.bind(this);
     this.matchSync = this.matchSync.bind(this);
-    return this.addSync(initialEntries);
+    this.addSync(initialEntries);
   }
   /**
    * Asynchronously adds paths to the Trie with the specified values.
@@ -158,13 +160,7 @@ export class Trie<I, V> {
    * @returns A Promise that resolves to the Trie instance.
    */
   set = async (path: AnyIterable<Segment<I>>, value: V) => {
-    const node = await hardSeek(this.#root, path);
-    const exists = node.has(dataSymbol);
-    node.set(dataSymbol, value);
-    if (!exists) {
-      ++this.#size;
-    }
-    return this;
+    return this.setSync(await collectPath(path), value);
   };
   /**
    * Synchronously sets the value for a path in the Trie.
@@ -191,13 +187,11 @@ export class Trie<I, V> {
     path: AnyIterable<Segment<I>>,
     callback: (prev: V | undefined, exists: boolean) => V | Promise<V>,
   ) => {
-    const node = await hardSeek(this.#root, path);
-    const exists = node.has(dataSymbol);
-    node.set(dataSymbol, await callback(node.get(dataSymbol), exists));
-    if (!exists) {
-      ++this.#size;
-    }
-    return this;
+    const segments = await collectPath(path);
+    const exists = this.hasSync(segments);
+    const value = await callback(this.getSync(segments), exists);
+    // Commit against the current tree once the callback resolves.
+    return this.setSync(segments, value);
   };
   /**
    * Synchronously sets the value for a path in the Trie using a callback.
@@ -209,13 +203,9 @@ export class Trie<I, V> {
     path: Iterable<Segment<I>>,
     callback: (prev: V | undefined, exists: boolean) => V,
   ) => {
-    const node = hardSeekSync(this.#root, path);
-    const exists = node.has(dataSymbol);
-    node.set(dataSymbol, callback(node.get(dataSymbol), exists));
-    if (!exists) {
-      ++this.#size;
-    }
-    return this;
+    const segments = [...path];
+    const value = callback(this.getSync(segments), this.hasSync(segments));
+    return this.setSync(segments, value);
   };
   /**
    * Asynchronously checks if a path exists in the Trie.
@@ -255,15 +245,7 @@ export class Trie<I, V> {
    * @returns A Promise that resolves to true if the path was deleted, false otherwise.
    */
   delete = async (path: AnyIterable<Segment<I>>) => {
-    const stack: Stack<I, V> = [];
-    const node = await softSeek(this.#root, path, stack);
-    if (!node) {
-      return false;
-    }
-    node.delete(dataSymbol);
-    cleanUp(node, stack);
-    --this.#size;
-    return true;
+    return this.deleteSync(await collectPath(path));
   };
   /**
    * Synchronously deletes a path from the Trie.
@@ -295,9 +277,8 @@ export class Trie<I, V> {
    */
   async *match(path: AnyIterable<I>) {
     const pathIterator =
-      Symbol.asyncIterator in path
-        ? path[Symbol.asyncIterator]()
-        : path[Symbol.iterator]();
+      (path as AsyncIterable<I>)[Symbol.asyncIterator]?.() ??
+      (path as Iterable<I>)[Symbol.iterator]();
     yield* traverse(this.#root, pathIterator);
   }
   /**
@@ -309,15 +290,18 @@ export class Trie<I, V> {
     const pathIterator = path[Symbol.iterator]();
     yield* traverseSync(this.#root, pathIterator);
   }
-  // #if DEV
-  /**
-   * Gets the root node of the Trie.
-   * @internal
-   */
-  get root() {
-    return this.#root;
+  /** @internal Available only to in-source tests. */
+  declare readonly root: Node<I, V>;
+
+  static {
+    if (import.meta.vitest) {
+      Object.defineProperty(Trie.prototype, "root", {
+        get(this: Trie<unknown, unknown>) {
+          return this.#root;
+        },
+      });
+    }
   }
-  // #endif
   /**
    * Gets the size of the Trie, i.e., the number of paths.
    */
@@ -330,139 +314,13 @@ export class Trie<I, V> {
   readonly [Symbol.toStringTag] = "Trie";
 }
 
-/**
- * Like ReadableStream.tee(), but for iterators.
- * https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream/tee
- *
- * See: MattiasBuelens/web-streams-polyfill#80
- * @template T - Type of elements in the iterator.
- * @param iterator - The iterator to split.
- * @returns An array containing two iterators.
- */
-function teeIterator<T>(iterator: AsyncIterator<T> | Iterator<T>) {
-  interface LinkedListNode<T> {
-    value: T;
-    next: LinkedListNode<T> | undefined;
+/** Materialize an asynchronous mutation before changing the tree. */
+async function collectPath<T>(path: AnyIterable<T>): Promise<T[]> {
+  const segments: T[] = [];
+  for await (const segment of path) {
+    segments.push(segment);
   }
-  // A linked list of enqueued chunks. (The first node has no value.)
-  let buffer: LinkedListNode<T> = {
-    value: undefined!,
-    next: undefined,
-  };
-  // Which branches have already been closed.
-  const closed: [boolean, boolean] = [false, false];
-  // Whether we're currently reading from the source.
-  let reading = false;
-  // Whether the source stream has closed.
-  let done = false;
-  // A promise for the current read (if reading is true).
-  let currentRead: Promise<void> | undefined;
-
-  async function next(): Promise<void> {
-    reading = true;
-    const result = await iterator.next();
-    if (result.done) {
-      done = true;
-    } else {
-      const nextNode: LinkedListNode<T> = {
-        value: result.value,
-        next: undefined,
-      };
-      buffer.next = nextNode;
-      buffer = nextNode;
-    }
-    reading = false;
-  }
-
-  async function* branch(i: 0 | 1, branchBuffer: LinkedListNode<T>) {
-    try {
-      while (true) {
-        if (branchBuffer.next) {
-          branchBuffer = branchBuffer.next;
-          yield branchBuffer.value;
-        } else if (done) {
-          return;
-        } else {
-          if (!reading) {
-            currentRead = next();
-          }
-          await currentRead;
-        }
-      }
-    } finally {
-      closed[i] = true;
-      // Close source iterator if both branches are closed
-      // Important: don't call return() if next() returned {done: true}!
-      if (!done && closed[1 - i]) {
-        await iterator.return?.();
-      }
-    }
-  }
-
-  return [branch(0, buffer), branch(1, buffer)] as const;
-}
-
-/**
- * Like ReadableStream.tee(), but for iterators (synchronous version).
- * https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream/tee
- *
- * See: MattiasBuelens/web-streams-polyfill#80
- * @template T - Type of elements in the iterator.
- * @param iterator - The iterator to split.
- * @returns An array containing two iterators.
- */
-function teeIteratorSync<T>(iterator: Iterator<T>) {
-  interface LinkedListNode<T> {
-    value: T;
-    next: LinkedListNode<T> | undefined;
-  }
-  // A linked list of enqueued chunks. (The first node has no value.)
-  let buffer: LinkedListNode<T> = {
-    value: undefined!,
-    next: undefined,
-  };
-  // Which branches have already been closed.
-  const closed: [boolean, boolean] = [false, false];
-  // Whether the source stream has closed.
-  let done = false;
-
-  function next() {
-    const result = iterator.next();
-    if (result.done) {
-      done = true;
-    } else {
-      const nextNode: LinkedListNode<T> = {
-        value: result.value,
-        next: undefined,
-      };
-      buffer.next = nextNode;
-      buffer = nextNode;
-    }
-  }
-
-  function* branch(i: 0 | 1, branchBuffer: LinkedListNode<T>) {
-    try {
-      while (true) {
-        if (branchBuffer.next) {
-          branchBuffer = branchBuffer.next;
-          yield branchBuffer.value;
-        } else if (done) {
-          return;
-        } else {
-          next();
-        }
-      }
-    } finally {
-      closed[i] = true;
-      // Close source iterator if both branches are closed
-      // Important: don't call return() if next() returned {done: true}!
-      if (!done && closed[1 - i]) {
-        iterator.return?.();
-      }
-    }
-  }
-
-  return [branch(0, buffer), branch(1, buffer)] as const;
+  return segments;
 }
 
 /**
@@ -471,7 +329,7 @@ function teeIteratorSync<T>(iterator: Iterator<T>) {
  * @returns True if the segment is a wildcard path segment, false otherwise.
  */
 function isWildcardSegment(segment: unknown): segment is WildcardSegment {
-  return segment instanceof WeakMap && segment.has(wildcardSymbol);
+  return segment instanceof WeakMap && segment.has(wildcardSegmentKey);
 }
 
 /**
@@ -555,7 +413,7 @@ function hardSeekStep<I, V>(
     }
     return childNode;
   }
-  seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
+  seekContext.pathWildcardCount += segment.get(wildcardSegmentKey) ?? 1;
   while (
     node.has(wildcardSymbol) &&
     seekContext.nodeWildcardCount < seekContext.pathWildcardCount
@@ -566,26 +424,6 @@ function hardSeekStep<I, V>(
     node = childNode;
   }
   return node;
-}
-
-/**
- * Performs a hard Trie seek operation.
- * @template I - Type of keys in the Trie.
- * @template V - Type of values stored in the Trie.
- * @param root - The root node of the Trie.
- * @param path - The path to seek in the Trie.
- * @returns The Trie node at the end of the seek operation.
- */
-async function hardSeek<I, V>(root: Node<I, V>, path: AnyIterable<Segment<I>>) {
-  let node = root;
-  const seekContext: SeekContext<I, V> = {
-    nodeWildcardCount: 0,
-    pathWildcardCount: 0,
-  };
-  for await (const segment of path) {
-    node = hardSeekStep(node, segment, seekContext);
-  }
-  return resolveNode(node, seekContext);
 }
 
 /**
@@ -637,7 +475,7 @@ function softSeekStep<I, V>(
     stack?.push([segment, node]);
     return childNode;
   }
-  seekContext.pathWildcardCount += segment.get(wildcardSymbol) ?? 1;
+  seekContext.pathWildcardCount += segment.get(wildcardSegmentKey) ?? 1;
   while (
     node.has(wildcardSymbol) &&
     seekContext.nodeWildcardCount < seekContext.pathWildcardCount
@@ -754,7 +592,8 @@ function cleanUp<I, V>(node: Node<I, V>, stack: Stack<I, V>) {
   if (
     !node.has(dataSymbol) &&
     node.has(wildcardSymbol) &&
-    isWildcardCountNode(node)
+    isWildcardCountNode(node) &&
+    node.size === 2
   ) {
     const childNode = node.get(wildcardSymbol)!;
     childNode.set(
@@ -766,137 +605,171 @@ function cleanUp<I, V>(node: Node<I, V>, stack: Stack<I, V>) {
   }
 }
 
-/**
- * Asynchronously generates values by traversing from a Trie node based on a path iterator.
- * @template I - Type of keys in the Trie.
- * @template V - Type of values stored in the Trie.
- * @param node - The Trie node to start branching from.
- * @param pathIterator - An asynchronous iterator representing the path to follow.
- * @returns An asynchronous generator yielding values based on the path.
- */
-async function* traverse<I, V>(
-  node: Node<I, V>,
-  pathIterator: AsyncIterator<I> | Iterator<I>,
-): AsyncGenerator<V | undefined, void, unknown> {
-  // wildcard
-  if (isWildcardCountNode(node)) {
-    for (let i = 0; i < node.get(wildcardCountSymbol)! - 1; ++i) {
-      const { done } = await pathIterator.next();
-      if (done) {
-        return;
-      }
-    }
-  }
-  // yield data
-  if (node.has(dataSymbol)) {
-    yield node.get(dataSymbol);
-  }
-  const { value, done } = await pathIterator.next();
-  if (done) {
-    return;
-  }
-  // find matched node
-  const nextWildcardNode = node.get(wildcardSymbol);
-  const nextRegularNode = node.get(value);
-  // wildcard match only
-  if (nextWildcardNode && !nextRegularNode) {
-    yield* traverse<I, V>(nextWildcardNode, pathIterator);
-  }
-  // regular match only
-  else if (!nextWildcardNode && nextRegularNode) {
-    yield* traverse<I, V>(nextRegularNode, pathIterator);
-  }
-  // both, we need to tee the path iterator
-  else if (nextWildcardNode && nextRegularNode) {
-    const [pathIterator1, pathIterator2] = teeIterator(pathIterator);
-    yield* traverse<I, V>(nextWildcardNode, pathIterator1);
-    yield* traverse<I, V>(nextRegularNode, pathIterator2);
-  }
-  // none
-  else {
-    return;
-  }
+/** A pending branch, positioned immediately after its incoming edge. */
+interface MatchFrame<I, V> {
+  node: Node<I, V>;
+  position: number;
 }
 
 /**
- * Synchronously generates values by traversing from a Trie node based on a path iterator.
- * @template I - Type of keys in the Trie.
- * @template V - Type of values stored in the Trie.
- * @param node - The Trie node to start branching from.
- * @param pathIterator - A synchronous iterator representing the path to follow.
- * @returns A generator yielding values based on the path.
+ * Retain only input needed by pending branches. Frames are ordered by
+ * nondecreasing position, so the bottom frame sets the replay boundary.
  */
-function* traverseSync<I, V>(
-  node: Node<I, V>,
-  pathIterator: Iterator<I>,
-): Generator<V | undefined, void, unknown> {
-  // wildcard
-  if (isWildcardCountNode(node)) {
-    for (let i = 0; i < node.get(wildcardCountSymbol)! - 1; ++i) {
-      const { done } = pathIterator.next();
-      if (done) {
-        return;
+function discardBefore<I>(buffer: Map<number, I>, position: number) {
+  for (const key of buffer.keys()) {
+    if (key >= position) {
+      break;
+    }
+    buffer.delete(key);
+  }
+}
+
+/** Traverse in wildcard-first order without recursive generator delegation. */
+async function* traverse<I, V>(
+  root: Node<I, V>,
+  iterator: AsyncIterator<I> | Iterator<I>,
+): AsyncGenerator<V, void, unknown> {
+  const stack: MatchFrame<I, V>[] = [{ node: root, position: 0 }];
+  const buffer = new Map<number, I>();
+  let read = 0;
+  let done = false;
+
+  async function readThrough(position: number, retainFrom: number) {
+    while (read <= position && !done) {
+      const result = await iterator.next();
+      if (result.done) {
+        done = true;
+      } else {
+        if (read >= retainFrom) {
+          buffer.set(read, result.value);
+        }
+        ++read;
       }
     }
+    return read > position;
   }
-  // yield data
-  if (node.has(dataSymbol)) {
-    yield node.get(dataSymbol);
+
+  try {
+    while (stack.length) {
+      const { node, position } = stack.pop()!;
+      const retainFrom = stack[0]?.position ?? position;
+      discardBefore(buffer, retainFrom);
+      if (position > 0 && !(await readThrough(position - 1, retainFrom))) {
+        continue;
+      }
+      if (node.has(dataSymbol)) {
+        yield node.get(dataSymbol)!;
+      }
+      // Leaf nodes finish at the matched position; child traversal drives reads.
+      if (!hasBranches(node) || !(await readThrough(position, retainFrom))) {
+        continue;
+      }
+      const regular = node.get(buffer.get(position)!);
+      const wildcard = node.get(wildcardSymbol);
+      if (regular) {
+        stack.push({ node: regular, position: position + 1 });
+      }
+      if (wildcard) {
+        stack.push({
+          node: wildcard,
+          position: position + wildcard.get(wildcardCountSymbol)!,
+        });
+      }
+    }
+  } finally {
+    if (!done) {
+      await iterator.return?.();
+    }
   }
-  const { value, done } = pathIterator.next();
-  if (done) {
-    return;
+}
+
+/** Synchronous counterpart of traverse, with the same order and ownership. */
+function* traverseSync<I, V>(
+  root: Node<I, V>,
+  iterator: Iterator<I>,
+): Generator<V, void, unknown> {
+  const stack: MatchFrame<I, V>[] = [{ node: root, position: 0 }];
+  const buffer = new Map<number, I>();
+  let read = 0;
+  let done = false;
+
+  function readThrough(position: number, retainFrom: number) {
+    while (read <= position && !done) {
+      const result = iterator.next();
+      if (result.done) {
+        done = true;
+      } else {
+        if (read >= retainFrom) {
+          buffer.set(read, result.value);
+        }
+        ++read;
+      }
+    }
+    return read > position;
   }
-  // find matched node
-  const childNode1 = node.get(wildcardSymbol);
-  const childNode2 = node.get(value);
-  // wildcard match only
-  if (childNode1 && !childNode2) {
-    yield* traverseSync<I, V>(childNode1, pathIterator);
+
+  try {
+    while (stack.length) {
+      const { node, position } = stack.pop()!;
+      const retainFrom = stack[0]?.position ?? position;
+      discardBefore(buffer, retainFrom);
+      if (position > 0 && !readThrough(position - 1, retainFrom)) {
+        continue;
+      }
+      if (node.has(dataSymbol)) {
+        yield node.get(dataSymbol)!;
+      }
+      if (!hasBranches(node) || !readThrough(position, retainFrom)) {
+        continue;
+      }
+      const regular = node.get(buffer.get(position)!);
+      const wildcard = node.get(wildcardSymbol);
+      if (regular) {
+        stack.push({ node: regular, position: position + 1 });
+      }
+      if (wildcard) {
+        stack.push({
+          node: wildcard,
+          position: position + wildcard.get(wildcardCountSymbol)!,
+        });
+      }
+    }
+  } finally {
+    if (!done) {
+      iterator.return?.();
+    }
   }
-  // regular match only
-  else if (!childNode1 && childNode2) {
-    yield* traverseSync<I, V>(childNode2, pathIterator);
-  }
-  // both, we need to tee the path iterator
-  else if (childNode1 && childNode2) {
-    const [pathIterator1, pathIterator2] = teeIteratorSync(pathIterator);
-    yield* traverseSync<I, V>(childNode1, pathIterator1);
-    yield* traverseSync<I, V>(childNode2, pathIterator2);
-  }
-  // none
-  else {
-    return;
-  }
+}
+
+/** Whether a node can consume further input, excluding its metadata. */
+function hasBranches<I, V>(node: Node<I, V>) {
+  return (
+    node.size > Number(node.has(dataSymbol)) + Number(isWildcardCountNode(node))
+  );
 }
 
 // in-source tests
 /* istanbul ignore if -- @preserve */
 if (import.meta.vitest) {
   const { it, expect, describe, beforeEach } = import.meta.vitest;
-  const clone = (await import("just-clone")).default;
 
   describe("wildcard segment function", () => {
     it("creating with no arguments", () => {
-      expect(w()).toStrictEqual(new WeakMap([[wildcardSymbol, 1]]));
-      expect(w(undefined)).toStrictEqual(new WeakMap([[wildcardSymbol, 1]]));
+      expect(w().get(wildcardSegmentKey)).toBe(1);
+      expect(w(undefined).get(wildcardSegmentKey)).toBe(1);
     });
 
     it("creating with a valid argument", () => {
-      expect(w(3)).toStrictEqual(new WeakMap([[wildcardSymbol, 3]]));
+      expect(w(3).get(wildcardSegmentKey)).toBe(3);
     });
 
     it("creating with invalid arguments", () => {
-      expect(w(0)).toStrictEqual(new WeakMap([[wildcardSymbol, 1]]));
-      expect(w(-1)).toStrictEqual(new WeakMap([[wildcardSymbol, 1]]));
-      expect(w(3.5)).toStrictEqual(new WeakMap([[wildcardSymbol, 1]]));
-      expect(w(NaN)).toStrictEqual(new WeakMap([[wildcardSymbol, 1]]));
-      expect(w("" as unknown as number)).toStrictEqual(
-        new WeakMap([[wildcardSymbol, 1]]),
-      );
-      expect(w(null as unknown as number)).toStrictEqual(
-        new WeakMap([[wildcardSymbol, 1]]),
-      );
+      expect(w(0).get(wildcardSegmentKey)).toBe(1);
+      expect(w(-1).get(wildcardSegmentKey)).toBe(1);
+      expect(w(3.5).get(wildcardSegmentKey)).toBe(1);
+      expect(w(Number.NaN).get(wildcardSegmentKey)).toBe(1);
+      expect(w("" as unknown as number).get(wildcardSegmentKey)).toBe(1);
+      expect(w(null as unknown as number).get(wildcardSegmentKey)).toBe(1);
     });
   });
 
@@ -1132,17 +1005,17 @@ if (import.meta.vitest) {
       });
 
       it("add(asyncEntries)", async () => {
-        await (
-          await trie.add(asyncEntriesGenerator1())
-        ).add(asyncEntriesGenerator2());
+        await (await trie.add(asyncEntriesGenerator1())).add(
+          asyncEntriesGenerator2(),
+        );
         expect(trie.root).toStrictEqual(root);
         expect(trie.size).toBe(2);
       });
 
       it("add(asyncPathsEntries)", async () => {
-        await (
-          await trie.add(asyncPathsEntriesGenerator1())
-        ).add(asyncPathsEntriesGenerator2());
+        await (await trie.add(asyncPathsEntriesGenerator1())).add(
+          asyncPathsEntriesGenerator2(),
+        );
         expect(trie.root).toStrictEqual(root);
         expect(trie.size).toBe(2);
       });
@@ -1610,9 +1483,10 @@ if (import.meta.vitest) {
       });
 
       it("set(asyncPath, value)", async () => {
-        await (
-          await trie.set(asyncPathGenerator1(), value1)
-        ).set(asyncPathGenerator2(), value2);
+        await (await trie.set(asyncPathGenerator1(), value1)).set(
+          asyncPathGenerator2(),
+          value2,
+        );
         expect(trie.root).toStrictEqual(root);
         expect(trie.size).toBe(2);
       });
@@ -3246,18 +3120,14 @@ if (import.meta.vitest) {
         expect(count).toBe(values.length);
       });
 
-      it(
-        "match(asyncPath)",
-        async () => {
-          let count = 0;
-          for await (const result of trie.match(asyncPathGenerator())) {
-            expect(result).toBe(values[count]);
-            count++;
-          }
-          expect(count).toBe(values.length);
-        },
-        { timeout: 100000 },
-      );
+      it("match(asyncPath)", async () => {
+        let count = 0;
+        for await (const result of trie.match(asyncPathGenerator())) {
+          expect(result).toBe(values[count]);
+          count++;
+        }
+        expect(count).toBe(values.length);
+      });
 
       it("matchSync(syncPath)", () => {
         let count = 0;

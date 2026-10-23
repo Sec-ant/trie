@@ -1,44 +1,24 @@
-/// <reference types="vitest" />
-import { transform } from "esbuild";
-import PreprocessorDirectives from "unplugin-preprocessor-directives/vite";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   build: {
+    target: "es2020",
     lib: {
-      entry: {
-        index: "./src/index.ts",
-      },
+      entry: "src/index.ts",
       formats: ["es"],
-      fileName: (format, entryName) =>
-        format === "es" ? `${entryName}.js` : `${entryName}.${format}.js`,
+      fileName: () => "index.js",
     },
   },
-  plugins: [
-    { ...PreprocessorDirectives(), apply: "build" },
-    {
-      name: "minifyEs",
-      renderChunk: {
-        order: "post",
-        async handler(code, _, outputOptions) {
-          if (outputOptions.format === "es") {
-            return await transform(code, { minify: true });
-          }
-          return code;
-        },
-      },
-    },
-  ],
   define: {
-    "import.meta.vitest": false,
+    "import.meta.vitest": "undefined",
   },
   test: {
-    api: {
-      host: "0.0.0.0",
-    },
-    includeSource: ["src/**/*.{js,ts}"],
+    include: ["tests/**/*.test.ts"],
+    includeSource: ["src/**/*.ts"],
     coverage: {
       provider: "istanbul",
+      include: ["src/**/*.ts"],
+      exclude: ["src/vite-env.d.ts"],
     },
   },
 });

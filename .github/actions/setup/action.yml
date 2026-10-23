@@ -1,0 +1,14 @@
+name: Setup
+description: Set up Node.js and install the pinned pnpm dependencies
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version-file: .node-version
+        package-manager-cache: false
+    - shell: bash
+      run: corepack enable
+    - shell: bash
+      run: pnpm install --frozen-lockfile

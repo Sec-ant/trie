@@ -1,14 +1,13 @@
 # @sec-ant/trie
 
-This repository contains an implementation of a Trie data structure in TypeScript. A Trie, also known as a prefix tree, is a tree-like data structure that stores data in a way that allows for efficient retrieval, insertion, and deletion. This particular implementation, additionally, has the following features:
+A TypeScript Trie for matching sequence prefixes with fixed-length wildcards.
 
-- **Any Type of Values**: Path segments and data can be any types of values. Not only strings or numbers.
-- **Synchronous and Asynchronous Methods**: Both synchronous and asynchronous APIs are provided.
-- **Unique Symbols**: The internal structure uses unique symbols to prevent collisions with user input.
-- **Supports Wildcards**: The Trie implementation supports wildcard paths, allowing for flexible and powerful queries.
-- **Accepts Iterables**: Accept synchronous and asynchronous iterables as paths. This makes it easy to work with iterable types other than strings or arrays.
-- **Generator Results**: When using the Trie to match against a path, the result is a generator. This allows for efficient memory usage and instant outputs.
-- **TypeScript Support**: This package is fully written in TypeScript and provides strong typing for better development experience.
+- **Generic keys and values**: Store path segments and values of any type.
+- **Fixed-length wildcards**: Use `w(n)` to match exactly `n` elements. Adjacent wildcard segments share a combined count.
+- **Iterable inputs**: Build and query rules with synchronous or asynchronous iterables.
+- **Generator results**: Receive matching values as traversal progresses, in wildcard-first order.
+- **Shared prefixes**: Rules share ordinary prefixes and compressed wildcard branches.
+- **Typed APIs**: Synchronous and asynchronous operations include TypeScript declarations.
 
 <table align="center">
 <tbody>
@@ -56,7 +55,7 @@ Map {
 
 </td>
 </tr>
-<tbody>
+</tbody>
 </table>
 
 ## Installation
@@ -77,7 +76,7 @@ import { Trie, w } from "@sec-ant/trie";
 // Create a new Trie
 const trie = new Trie<string, string>();
 
-// Set a path with no wildcards to the Trie
+// Set an exact path
 trie.setSync(["path", "with", "no", "wildcard"], "value1");
 
 // Set another path with wildcards to the Trie
@@ -105,17 +104,53 @@ for (const value of trie.matchSync([
   "with",
   "wildcards",
 ])) {
-  console.log(value); // "value1" then "value2"
+  console.log(value); // "value2" then "value1" (wildcard branches are visited first)
 }
 
 // Delete a path from the Trie
-trie.delete(["path", "to", w(1), w(1), w(1), "wildcards"]);
+trie.deleteSync(["path", "with", w(4), "wildcards"]);
 
 // Clear all paths from the Trie
 trie.clear();
 ```
 
 ## API
+
+### Matching semantics
+
+Rules match prefixes anchored at the beginning of the input. Successful matches
+allow trailing input. `w(n)` consumes exactly `n` elements, and adjacent wildcard
+segments are equivalent to a single segment with their combined count.
+
+`get` and `has` look up stored rules, including their wildcard segments. Use
+`match` or `matchSync` to match concrete input against those rules. Ordinary path
+segments use `Map` key equality: objects match by identity, and `NaN` matches
+`NaN`.
+
+Results follow depth-first, wildcard-first order: a node's value, its wildcard
+subtree, then its matching ordinary child. Each matching rule contributes one
+value, including rules that store the same value. Wildcard-first traversal can
+read farther into the input before yielding a shorter ordinary rule. A shared
+buffer retains input needed by pending branches.
+
+Both match methods manage the iterator obtained from the input. For an active
+iterator, matching calls `return()` on completion, early consumer exit, or a read
+failure. An exhausted iterator completes through its `done: true` result. Leaf
+nodes finish at their matched position; pending branches can require additional
+input. Resource adapters can coordinate iterator ownership, replay, and continued
+consumption of the underlying data.
+
+### Asynchronous mutations
+
+`set`, `setCallback`, and `delete` collect finite input paths, then commit each
+mutation against the current tree. The `size` property counts stored rules
+across concurrent mutations.
+
+`setCallback` receives a snapshot of the value and existence flag at invocation.
+Its returned value is committed against the current tree when the callback
+resolves. Overlapping callbacks can observe the same snapshot; the last callback
+to complete wins. Sequentially awaited updates let each callback observe the
+preceding commit.
 
 ### `w`
 
@@ -125,7 +160,7 @@ This is a function to create wildcard segments that can be used in a path when c
 /**
  * Creates a wildcard path segment with an optional count.
  * @param count - Optional count for the wildcard. Default is 1.
- * @returns A  wildcard path segment.
+ * @returns A wildcard path segment.
  */
 export declare function w(count?: number): WildcardSegment;
 ```
@@ -141,6 +176,8 @@ The `Trie` class provides the following methods:
 - `addSync(initialEntries: Iterable<[Iterable<I | WildcardSegment>, V]>)`: Synchronously adds paths to the Trie with the specified values.
 - `set(path: AnyIterable<I | WildcardSegment>, value: V)`: Asynchronously sets the value for a path in the Trie.
 - `setSync(path: Iterable<I | WildcardSegment>, value: V)`: Synchronously sets the value for a path in the Trie.
+- `setCallback(path, callback)`: Asynchronously computes a value from the previous value and an existence flag, then stores it. The callback may return a promise.
+- `setCallbackSync(path, callback)`: Synchronously computes and stores a value using the same callback arguments.
 - `has(path: AnyIterable<I | WildcardSegment>)`: Asynchronously checks if a path exists in the Trie.
 - `hasSync(path: Iterable<I | WildcardSegment>)`: Synchronously checks if a path exists in the Trie.
 - `get(path: AnyIterable<I | WildcardSegment>)`: Asynchronously retrieves the value associated with a path in the Trie.
@@ -156,6 +193,51 @@ The `Trie` class provides the following methods:
 The `Trie` class provides the following properties:
 
 - `size`: Get the size of the Trie, i.e., the number of paths. This value is read only.
+
+## Development
+
+Use Node.js 24 and the pnpm version pinned in `package.json`.
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm browser
+pnpm build
+pnpm test:ci
+pnpm coverage
+pnpm test:package
+```
+
+`pnpm build` validates formatting, lint, and types, then emits the ES2020 ESM
+bundle and declarations. `pnpm test:ci` runs the in-source and
+regression tests in Node.js, Chromium, and Firefox. `pnpm test:package` packs and
+installs the actual tarball in a temporary directory, then checks runtime
+behavior and TypeScript consumers using ES2020 libraries with NodeNext and
+Bundler resolution.
+
+Use `pnpm check:fix` to apply formatting and lint fixes. Biome owns code and
+JSON; Prettier owns Markdown and YAML. Git hooks run lint-staged and commitlint.
+CI validates Node.js 22 and 24, both browsers, coverage, and the packed package.
+
+Run `pnpm bench` for local matching benchmarks. An optional absolute path to a
+baseline ESM implementation can be passed as `pnpm bench /path/to/baseline.mjs`.
+The output reports median microseconds per operation across nine rounds;
+results depend on the machine, runtime, and workload.
+
+Run `pnpm changeset` for user-facing changes and `pnpm version-packages` to
+prepare release versions and changelogs.
+
+### Releases
+
+The release workflow creates a version pull request from changesets on `main`.
+Merging that pull request builds, validates, and packs the release. A separate
+publish job publishes the verified tarball to npm with OIDC authentication and
+provenance, then creates the Git tag and GitHub release.
+
+The npm trusted publisher identifies owner `Sec-ant`, repository `trie`, and
+workflow `release.yml`, with direct publishing enabled. GitHub Actions has
+permission to create version pull requests. Publish permissions belong to the
+publish job; build and validation jobs use repository read access.
 
 ## License
 
